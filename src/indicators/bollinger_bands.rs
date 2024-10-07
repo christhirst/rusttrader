@@ -20,8 +20,11 @@ pub struct BollingerBands {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BollingerBandsOutput {
+    //moving average
     pub average: f64,
+    //positiv multiplier
     pub upper: f64,
+    //negativ multiplier
     pub lower: f64,
 }
 
@@ -66,7 +69,7 @@ impl Next<f64> for BollingerBands {
         // Calculate the mean and standard deviation based on the current window
         let values: Vec<f64> = self.window.iter().map(|&(_, val)| val).collect();
         let mean = values.iter().sum::<f64>() / values.len() as f64;
-        let sd = self.sd.next((timestamp, value));
+        let sd: f64 = self.sd.next((timestamp, value));
         mean + sd * self.multiplier
     }
 }
@@ -106,6 +109,7 @@ mod tests {
 
     #[test]
     fn test_next() {
+        //Setup
         let mut bb = BollingerBands::new(Duration::days(3), 2.0).unwrap();
         let now = Utc::now();
 

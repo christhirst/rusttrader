@@ -25,6 +25,7 @@ pub use self::max_drawdown::MaxDrawdown;
 mod max_drawup;
 pub use self::max_drawup::MaxDrawup;
 
+#[macro_use]
 mod bollinger_bands;
 pub use self::bollinger_bands::{BollingerBands, BollingerBandsOutput};
 

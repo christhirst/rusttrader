@@ -3,15 +3,17 @@ use std::str::FromStr;
 use alpaca_to_polars::S;
 use apca::data::v2::bars::{List, ListReqInit, TimeFrame};
 use apca::{ApiInfo, Client, RequestError};
-use chrono::{prelude::*, Months};
+use chrono::{prelude::*, Months, TimeDelta};
 use error::CLIError;
 use indicators::BollingerBands;
 use polars::df;
 use polars::prelude::*;
+use traits::Next;
 
 mod alpaca_to_polars;
 mod error;
 mod indicators;
+mod test_helper;
 mod trader;
 mod traits;
 
@@ -57,6 +59,11 @@ fn data(res: apca::data::v2::bars::Bars, span: DynamicGroupOptions) -> Result<Da
 
 #[tokio::main]
 async fn main() {
+    let mut bb = BollingerBands::new(TimeDelta::hours(1), 3.0).unwrap(); // window size of 3 seconds
+    let now = Utc::now();
+
+    //bb.next((now, 2.0)), 2.0);
+
     let span = DynamicGroupOptions {
         index_column: PlSmallStr::from("movingAvg"),
         every: Duration::parse("1d"),
@@ -66,8 +73,10 @@ async fn main() {
     };
     let res = data_get("2018-11-03T21:47:00Z").await.unwrap();
     let oo = data(res, span).unwrap();
+    for i in oo.column("close").into_iter() {
+        print!("{:?}", i);
+    }
 
-    print!("{:?}", oo);
     //let df_av = s.v.lazy().w
 }
 
