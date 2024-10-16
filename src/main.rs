@@ -1,18 +1,16 @@
 use std::str::FromStr;
+use std::vec;
 
 use alpaca_to_polars::S;
 use apca::data::v2::bars::{List, ListReqInit, TimeFrame};
-use apca::{ApiInfo, Client, RequestError};
-use chrono::{prelude::*, Months, TimeDelta};
+use apca::{ApiInfo, Client};
+use chrono::{prelude::*, Months};
 use error::CLIError;
-use indicators::BollingerBands;
-use polars::df;
 use polars::prelude::*;
-use traits::Next;
 
 mod alpaca_to_polars;
+mod config;
 mod error;
-mod indicators;
 mod test_helper;
 mod trader;
 mod traits;
@@ -57,27 +55,44 @@ fn data(res: apca::data::v2::bars::Bars, span: DynamicGroupOptions) -> Result<Da
     Ok(oo)
 }
 
+use proto::indicator_client::IndicatorClient;
+
+pub mod proto {
+    tonic::include_proto!("calculate");
+}
+
 #[tokio::main]
-async fn main() {
-    let mut bb = BollingerBands::new(TimeDelta::hours(1), 3.0).unwrap(); // window size of 3 seconds
-    let now = Utc::now();
+async fn main() -> Result<(), CLIError> {
+    //CONFIG from file
+    let file = "Config.toml";
+    let conf = config::confload(file)?;
+
+    let df = CsvReadOptions::default()
+        .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+        .unwrap()
+        .finish()
+        .unwrap();
+    println!("{}", df);
+
+    let addr = "http://[::1]:50051";
+    let mut client = IndicatorClient::connect(addr).await.unwrap();
+    let req = proto::ListNumbersRequest2 {
+        id: 9,
+        list: vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0],
+    };
+    let request = tonic::Request::new(req);
+    let resp = client.gen_liste(request).await.unwrap();
+
+    println!("{:?}", resp.get_ref().result);
+
+    //let now = Utc::now();
 
     //bb.next((now, 2.0)), 2.0);
 
-    let span = DynamicGroupOptions {
-        index_column: PlSmallStr::from("movingAvg"),
-        every: Duration::parse("1d"),
-        period: Duration::parse("2d"),
-        offset: Duration::parse("0d"),
-        ..Default::default()
-    };
-    let res = data_get("2018-11-03T21:47:00Z").await.unwrap();
-    let oo = data(res, span).unwrap();
-    for i in oo.column("close").into_iter() {
-        print!("{:?}", i);
-    }
+    //let res = data_get("2018-11-03T21:47:00Z").await.unwrap();
 
     //let df_av = s.v.lazy().w
+    Ok(())
 }
 
 //POLARS

@@ -4,8 +4,8 @@ mod test_helper;
 
 //mod helpers;
 
+pub mod config;
 pub mod error;
-pub mod indicators;
 
 mod traits;
 pub use crate::traits::*;

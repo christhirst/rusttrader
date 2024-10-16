@@ -2,16 +2,26 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+
+use crate::config::ConfigError;
 #[derive(thiserror::Error, Debug)]
 pub enum CLIError {
     #[error("Database error")]
     ConvertingError,
 
+    #[error("Config error")]
+    ConfigError(#[from] ConfigError),
+
     #[error("Failed to get data from Alpaca API")]
     DBError(#[from] apca::RequestError<apca::data::v2::bars::ListError>),
 }
 
+/* impl From<ConfigError> for CLIError {
+    fn from(err: ConfigError) -> CLIError {
+        CLIError::ConfigError(err)
+    }
+}
+ */
 impl IntoResponse for CLIError {
     fn into_response(self) -> Response {
         (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
