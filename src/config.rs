@@ -62,7 +62,7 @@ impl Default for AppConfig {
         )];
 
         Self {
-            grpcport: "8001".to_string(),
+            grpcport: "http://[::1]:50051".to_string(),
             username: "testuser".to_string(),
             password: "testPW".to_string(),
             baseurl: "http://localhost:8000".to_string(),
@@ -79,47 +79,49 @@ impl Default for AppConfig {
         }
     }
 }
-pub fn load_or_initialize(filename: &str) -> Result<AppConfig, ConfigError> {
-    let config_path = Path::new(filename);
-    if config_path.exists() {
-        // The `?` operator tells Rust, if the value is an error, return that error.
-        // You can also use the `?` operator on the Option enum.
 
-        let content = fs::read_to_string(config_path)?;
-        let config = toml::from_str(&content)?;
+impl AppConfig {
+    pub fn load_or_initialize(self, filename: &str) -> Result<AppConfig, ConfigError> {
+        let config_path = Path::new(filename);
+        if config_path.exists() {
+            // The `?` operator tells Rust, if the value is an error, return that error.
+            // You can also use the `?` operator on the Option enum.
 
-        return Ok(config);
+            let content = fs::read_to_string(config_path)?;
+            let config = toml::from_str(&content)?;
+
+            return Ok(config);
+        }
+
+        // The config file does not exist, so we must initialize it with the default values.
+        let config = AppConfig::default();
+        let toml = toml::to_string(&config).unwrap();
+
+        fs::write(config_path, toml)?;
+        Ok(config)
     }
 
-    // The config file does not exist, so we must initialize it with the default values.
-    let config = AppConfig::default();
-    let toml = toml::to_string(&config).unwrap();
+    pub fn confload(self, file: &str) -> Result<AppConfig, ConfigError> {
+        let config: AppConfig = match self.load_or_initialize(file) {
+            Ok(v) => v,
+            Err(err) => {
+                /* match err {
+                    ConfigError::IoError(err) => {
+                        eprintln!("An error occurred while loading the config: {err}");
+                    }
+                    ConfigError::InvalidConfig(err) => {
+                        eprintln!("An error occurred while parsing the config:");
+                        eprintln!("{err}");
+                    }
+                } */
+                return Err(err);
+            }
+        };
 
-    fs::write(config_path, toml)?;
-    Ok(config)
+        Ok(config)
+        //println!("{:?}", config);
+    }
 }
-
-pub fn confload(file: &str) -> Result<AppConfig, ConfigError> {
-    let config: AppConfig = match load_or_initialize(file) {
-        Ok(v) => v,
-        Err(err) => {
-            /* match err {
-                ConfigError::IoError(err) => {
-                    eprintln!("An error occurred while loading the config: {err}");
-                }
-                ConfigError::InvalidConfig(err) => {
-                    eprintln!("An error occurred while parsing the config:");
-                    eprintln!("{err}");
-                }
-            } */
-            return Err(err);
-        }
-    };
-
-    Ok(config)
-    //println!("{:?}", config);
-}
-
 /* #[cfg(test)]
 mod tests {
     use super::*;
