@@ -1,8 +1,9 @@
 use std::{
     collections::HashMap,
     fmt::{self},
+    sync::Arc,
     thread,
-    time::{Duration, Instant},
+    time::{self, Duration, Instant},
 };
 
 use apca::data;
@@ -66,34 +67,130 @@ impl TraderConfigs {
     } */
 
     pub async fn trader_spawn(self, d: Duration, now: Instant) -> Vec<JoinHandle<()>> {
+        let arc = Arc::new(self);
         let mut treads: Vec<JoinHandle<()>> = vec![];
-        for (symbol, trader_conf) in self.conf_map {
-            let ee = self.client.clone();
-            let f = trader;
+        for (symbol, trader_conf) in arc.conf_map.clone() {
+            let self_clone = Arc::clone(&arc);
+            // No need to clone if not using Arc
+            //let client = (&self.trader).clone(); // Use `clone()` if `IndicatorClient` implements Clone
             let t = tokio::spawn(async move {
-                //println!("Hello, world! {:?}", now.elapsed());
-                //thread::sleep(d);
-                f(trader_conf.clone(), ee).await;
-                // some work here
+                let ten_millis = time::Duration::from_millis(100);
+                let now = time::Instant::now();
+
+                thread::sleep(ten_millis);
+                self_clone.trader(&trader_conf).await;
             });
             treads.push(t);
         }
-
         treads
+    }
+
+    async fn decision_point(
+        self: Arc<Self>,
+        indicator: proto::IndicatorType,
+        // mut client: IndicatorClient<Channel>,
+    ) -> Result<(), CLIError> {
+        let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
+        let indicate = self
+            .clone()
+            .grpc(indicator, String::from("ORCL"), data)
+            .await;
+        let desc = self.desision_maker(indicate);
+        let ae = action_evaluator(desc);
+        match ae.action {
+            Action::Buy => stock_buy(ae),
+            Action::Sell => stock_sell(ae),
+            _ => Ok(()),
+        }
+    }
+
+    async fn grpc(
+        self: Arc<Self>,
+        indicator: IndicatorType,
+        //ii: IndicatorClient<Channel>,
+        symbol: String,
+        data: Vec<f64>,
+    ) -> Indi {
+        let mut treads: Vec<JoinHandle<()>> = vec![];
+        let mut c = self.client.clone();
+        let handle = tokio::spawn(async move {
+            println!("now running on a worker thread");
+            let req = proto::ListNumbersRequest2 {
+                id: indicator.into(),
+                list: data,
+            };
+            let request = tonic::Request::new(req);
+            c.gen_liste(request).await.unwrap();
+        });
+        treads.push(handle);
+
+        for i in treads {
+            i.await.unwrap();
+        }
+        Indi {
+            symbol, //String::from("ORCL"),
+            indicator: HashMap::new(),
+        }
+    }
+
+    async fn trader(self: Arc<Self>, conf: &TraderConf) {
+        let self_clone = Arc::clone(&self);
+        for i in conf.indicator.iter() {
+            self_clone.clone().decision_point(*i).await;
+        }
+    }
+
+    fn desision_maker(self: Arc<Self>, indicator: Indi) -> Vec<Action> {
+        let mut action = vec![];
+        match indicator
+            .indicator
+            .get(&proto::IndicatorType::BollingerBands)
+        {
+            Some(x) => {
+                if *x > 0.1 {
+                    action.push(Action::Buy)
+                } else {
+                    action.push(Action::Sell)
+                }
+            }
+            None => action.push(Action::Hold),
+        };
+        action
     }
 }
 
-struct indi {
+/* async fn trader(conf: TraderConf, mut client: IndicatorClient<Channel>) {
+    for i in conf.indicator.iter() {
+        decision_point(*i, client.clone()).await;
+    }
+} */
+
+/* async fn decision_point(
+    indicator: proto::IndicatorType,
+    mut client: IndicatorClient<Channel>,
+) -> Result<(), CLIError> {
+    let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
+    let indicate = grpc(indicator, client.clone(), String::from("ORCL"), data).await;
+    let desc = desision_maker(indicate);
+    let ae = action_evaluator(desc);
+    match ae.action {
+        Action::Buy => stock_buy(ae),
+        Action::Sell => stock_sell(ae),
+        _ => Ok(()),
+    }
+} */
+
+struct Indi {
     symbol: String,
     indicator: HashMap<proto::IndicatorType, f64>,
 }
 
-async fn grpc(
+/* async fn grpc(
     indicator: IndicatorType,
     ii: IndicatorClient<Channel>,
     symbol: String,
     data: Vec<f64>,
-) -> indi {
+) -> Indi {
     let mut treads: Vec<JoinHandle<()>> = vec![];
     let mut c = ii.clone();
     let handle = tokio::spawn(async move {
@@ -110,63 +207,58 @@ async fn grpc(
     for i in treads {
         i.await.unwrap();
     }
-    indi {
+    Indi {
         symbol, //String::from("ORCL"),
         indicator: HashMap::new(),
     }
-}
+} */
 
 fn action_evaluator(av: Vec<Action>) -> ActionValuator {
-    todo!()
-}
-
-async fn decision_point(
-    indicator: proto::IndicatorType,
-    mut client: IndicatorClient<Channel>,
-) -> Result<(), CLIError> {
-    let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
-    let indicate = grpc(indicator, client.clone(), String::from("ORCL"), data).await;
-    let desc = desision_maker(indicate);
-    let ae = action_evaluator(desc);
-    match ae.action {
-        Action::Buy => stock_buy(ae),
-        Action::Sell => stock_sell(ae),
-        _ => Ok(()),
-    }
-}
-
-async fn trader(conf: TraderConf, mut client: IndicatorClient<Channel>) {
-    for i in conf.indicator.iter() {
-        decision_point(*i, client.clone()).await;
+    let buy_count = av.iter().filter(|x| **x == Action::Buy).count();
+    let sell_count = av.iter().filter(|x| **x == Action::Sell).count();
+    if buy_count > sell_count * 2 {
+        ActionValuator {
+            symbol: String::from("ORCL"),
+            strength: 0.1,
+            action: Action::Buy,
+        }
+    } else {
+        ActionValuator {
+            symbol: String::from("ORCL"),
+            strength: 0.2,
+            action: Action::Buy,
+        }
     }
 }
 
 fn stock_buy(av: ActionValuator) -> Result<(), CLIError> {
+    let _ = av;
     todo!()
 }
 fn stock_sell(av: ActionValuator) -> Result<(), CLIError> {
+    let _ = av;
     todo!()
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum Action {
     Buy,
     Sell,
     Hold,
 }
 
-#[derive(Clone)]
+/* #[derive(Clone)]
 pub struct ActionRequest {
     symbol: String,
     action: Action,
 }
-
-#[derive(Clone)]
+ */
+/* #[derive(Clone)]
 pub struct IndicatorValuator {
     symbol: String,
     strength: f64,
     action: proto::IndicatorType,
-}
+} */
 
 #[derive(Clone)]
 pub struct ActionValuator {
@@ -175,7 +267,7 @@ pub struct ActionValuator {
     action: Action,
 }
 
-fn desision_maker(indicator: indi) -> Vec<Action> {
+/* fn desision_maker(indicator: Indi) -> Vec<Action> {
     let mut action = vec![];
     match indicator
         .indicator
@@ -187,12 +279,11 @@ fn desision_maker(indicator: indi) -> Vec<Action> {
             } else {
                 action.push(Action::Sell)
             }
-            action.push(Action::Hold)
         }
         None => action.push(Action::Hold),
     };
     action
-}
+} */
 
 fn send_data() {}
 
@@ -204,12 +295,25 @@ mod tests {
     fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
         let mut gg = vec![HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)])];
 
-        let hm = indi {
+        let hm = Indi {
             symbol: String::from("ORCL"),
             indicator: gg,
         };
 
         desision_maker(hm);
+        //findReplace(hay, r"^ki");
+        //let result = 2 + 2;
+        let o = AppConfig::default();
+        println!("{:?}", conf);
+        assert_eq!(conf, o);
+        Ok(())
+    }
+
+    #[test]
+    fn action_evaluator_test() -> Result<(), Box<dyn std::error::Error>> {
+        let mut gg = vec![Action::Buy, Action::Buy, Action::Buy, Action::Sell];
+
+        action_evaluator(gg);
         //findReplace(hay, r"^ki");
         //let result = 2 + 2;
         let o = AppConfig::default();
