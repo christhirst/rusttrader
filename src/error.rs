@@ -1,3 +1,4 @@
+use apca::{api::v2::order::CreateError, RequestError};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -14,6 +15,9 @@ pub enum CLIError {
 
     #[error("Failed to get data from Alpaca API")]
     DBError(#[from] apca::RequestError<apca::data::v2::bars::ListError>),
+
+    #[error("Config error")]
+    ConsfigError(#[from] RequestError<CreateError>),
 }
 
 /* impl From<ConfigError> for CLIError {

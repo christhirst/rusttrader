@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-use std::hash::Hash;
 use std::str::FromStr;
-use std::{thread, time, vec};
 
 use alpaca_to_polars::S;
 use apca::data::v2::bars::{List, ListReqInit, TimeFrame};
@@ -66,73 +63,14 @@ pub mod proto {
 
 #[tokio::main]
 async fn main() -> Result<(), CLIError> {
-    /* //CONFIG from file
-    let file = "Config.toml";
-    // let conf = config::confload(file)?;
-
-    let df = CsvReadOptions::default()
-        .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
-        .unwrap()
-        .finish()
-        .unwrap();
-    println!("{}", df);
-
-    let addr = "http://[::1]:50051";
-    let mut client = IndicatorClient::connect(addr).await.unwrap();
-    let req = proto::ListNumbersRequest2 {
-        id: proto::IndicatorType::BollingerBands.into(),
-        list: vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0],
-    };
-    let request = tonic::Request::new(req);
-    let resp = client.gen_liste(request).await.unwrap();
-
-    println!("{:?}", resp.get_ref().result); */
-
     let tr = TraderConfigs::new("Config.toml").await;
 
     let i = Instant::now();
     let ten_millis = Duration::from_millis(1000);
     let handles = tr.trader_spawn(ten_millis, i).await;
 
-    //println!("{:?}", tr);
-
-    //TODO Trader gets "symbol" "close" Indicator indicator-config Buy/Sell-signal
-
-    //let now = Utc::now();
-    //bb.next((now, 2.0)), 2.0);
-    //let res = data_get("2018-11-03T21:47:00Z").await.unwrap();
-    //let df_av = s.v.lazy().w
-
-    /* let mut createTrader = HashMap::new();
-    let tc = TraderConf {
-        symbol: String::from("ORCL"),
-        indicator: vec![
-            (proto::IndicatorType::BollingerBands),
-            (proto::IndicatorType::SimpleMovingAverage),
-        ],
-    };
-    createTrader.insert(String::from("ORCL"), tc.clone());
-    createTrader.insert(String::from("ORCLs"), tc);
-
-    //setup multiple trader
-    //benchmark them against each other
-    let tc = TraderConfigs {
-        confMap: createTrader,
-    };
-
-    let ten_millis = Duration::from_millis(1000);
-    let now = time::Instant::now();
-
-    let handles = traderSpawn(ten_millis, now, tc);
-
-    // join the handles in the vector*/
     for i in handles {
         i.await.unwrap();
     }
     Ok(())
 }
-
-//POLARS
-/* let df = DataFrame::new(vec![Series::new("close".into(), b)]).unwrap();
-
-println!("{}", df); */

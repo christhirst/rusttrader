@@ -6,7 +6,11 @@ use std::{
     time::{self, Duration, Instant},
 };
 
-use apca::data;
+use apca::{
+    api::v2::order::{self, Order, Side, Type},
+    data, ApiInfo, Client,
+};
+use num_decimal::Num;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
@@ -61,10 +65,10 @@ impl TraderConfigs {
         }
     }
 
-    /* async fn reconnect_client(mut self, port: &str) {
+    async fn reconnect_client(mut self, port: &str) {
         let addr = "http://[::1]:50051";
         self.client = IndicatorClient::connect(addr).await.unwrap();
-    } */
+    }
 
     pub async fn trader_spawn(self, d: Duration, now: Instant) -> Vec<JoinHandle<()>> {
         let arc = Arc::new(self);
@@ -89,7 +93,7 @@ impl TraderConfigs {
         self: Arc<Self>,
         indicator: proto::IndicatorType,
         // mut client: IndicatorClient<Channel>,
-    ) -> Result<(), CLIError> {
+    ) -> Result<Order, CLIError> {
         let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
         let indicate = self
             .clone()
@@ -98,9 +102,9 @@ impl TraderConfigs {
         let desc = self.desision_maker(indicate);
         let ae = action_evaluator(desc);
         match ae.action {
-            Action::Buy => stock_buy(ae),
-            Action::Sell => stock_sell(ae),
-            _ => Ok(()),
+            Action::Buy => stock_buy(ae).await,
+            Action::Sell => stock_sell(ae).await,
+            _ => todo!(),
         }
     }
 
@@ -159,59 +163,10 @@ impl TraderConfigs {
     }
 }
 
-/* async fn trader(conf: TraderConf, mut client: IndicatorClient<Channel>) {
-    for i in conf.indicator.iter() {
-        decision_point(*i, client.clone()).await;
-    }
-} */
-
-/* async fn decision_point(
-    indicator: proto::IndicatorType,
-    mut client: IndicatorClient<Channel>,
-) -> Result<(), CLIError> {
-    let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
-    let indicate = grpc(indicator, client.clone(), String::from("ORCL"), data).await;
-    let desc = desision_maker(indicate);
-    let ae = action_evaluator(desc);
-    match ae.action {
-        Action::Buy => stock_buy(ae),
-        Action::Sell => stock_sell(ae),
-        _ => Ok(()),
-    }
-} */
-
 struct Indi {
     symbol: String,
     indicator: HashMap<proto::IndicatorType, f64>,
 }
-
-/* async fn grpc(
-    indicator: IndicatorType,
-    ii: IndicatorClient<Channel>,
-    symbol: String,
-    data: Vec<f64>,
-) -> Indi {
-    let mut treads: Vec<JoinHandle<()>> = vec![];
-    let mut c = ii.clone();
-    let handle = tokio::spawn(async move {
-        println!("now running on a worker thread");
-        let req = proto::ListNumbersRequest2 {
-            id: indicator.into(),
-            list: data,
-        };
-        let request = tonic::Request::new(req);
-        c.gen_liste(request).await.unwrap();
-    });
-    treads.push(handle);
-
-    for i in treads {
-        i.await.unwrap();
-    }
-    Indi {
-        symbol, //String::from("ORCL"),
-        indicator: HashMap::new(),
-    }
-} */
 
 fn action_evaluator(av: Vec<Action>) -> ActionValuator {
     let buy_count = av.iter().filter(|x| **x == Action::Buy).count();
@@ -231,13 +186,35 @@ fn action_evaluator(av: Vec<Action>) -> ActionValuator {
     }
 }
 
-fn stock_buy(av: ActionValuator) -> Result<(), CLIError> {
-    let _ = av;
-    todo!()
+async fn stock_buy(av: ActionValuator) -> Result<Order, CLIError> {
+    let amount = (av.strength * 10.0) as i64;
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+    let request = order::CreateReqInit {
+        type_: Type::Limit,
+        limit_price: Some(Num::from(100)),
+        ..Default::default()
+    }
+    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
+
+    let order = client.issue::<order::Create>(&request).await?;
+    println!("order: {:#?}", order);
+    Ok(order)
 }
-fn stock_sell(av: ActionValuator) -> Result<(), CLIError> {
-    let _ = av;
-    todo!()
+async fn stock_sell(av: ActionValuator) -> Result<Order, CLIError> {
+    let amount = (av.strength * 10.0) as i64;
+    let api_info = ApiInfo::from_env().unwrap();
+    let client = Client::new(api_info);
+    let request = order::CreateReqInit {
+        type_: Type::Limit,
+        limit_price: Some(Num::from(100)),
+        ..Default::default()
+    }
+    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
+
+    let order = client.issue::<order::Create>(&request).await?;
+    println!("order: {:#?}", order);
+    Ok(order)
 }
 
 #[derive(Clone, PartialEq)]
@@ -247,45 +224,12 @@ enum Action {
     Hold,
 }
 
-/* #[derive(Clone)]
-pub struct ActionRequest {
-    symbol: String,
-    action: Action,
-}
- */
-/* #[derive(Clone)]
-pub struct IndicatorValuator {
-    symbol: String,
-    strength: f64,
-    action: proto::IndicatorType,
-} */
-
 #[derive(Clone)]
 pub struct ActionValuator {
     symbol: String,
     strength: f64,
     action: Action,
 }
-
-/* fn desision_maker(indicator: Indi) -> Vec<Action> {
-    let mut action = vec![];
-    match indicator
-        .indicator
-        .get(&proto::IndicatorType::BollingerBands)
-    {
-        Some(x) => {
-            if *x > 0.1 {
-                action.push(Action::Buy)
-            } else {
-                action.push(Action::Sell)
-            }
-        }
-        None => action.push(Action::Hold),
-    };
-    action
-} */
-
-fn send_data() {}
 
 #[cfg(test)]
 mod tests {
