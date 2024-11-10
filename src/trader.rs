@@ -3,12 +3,12 @@ use std::{
     fmt::{self},
     sync::Arc,
     thread,
-    time::{self, Duration, Instant},
+    time::{self, Instant},
 };
 
 use apca::{
     api::v2::order::{self, Order, Side, Type},
-    data, ApiInfo, Client,
+    ApiInfo, Client,
 };
 use num_decimal::Num;
 use tokio::task::JoinHandle;
@@ -70,7 +70,7 @@ impl TraderConfigs {
         self.client = IndicatorClient::connect(addr).await.unwrap();
     }
 
-    pub async fn trader_spawn(self, d: Duration, now: Instant) -> Vec<JoinHandle<()>> {
+    pub async fn trader_spawn(self, now: Instant) -> Vec<JoinHandle<()>> {
         let arc = Arc::new(self);
         let mut treads: Vec<JoinHandle<()>> = vec![];
         for (symbol, trader_conf) in arc.conf_map.clone() {

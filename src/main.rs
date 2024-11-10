@@ -66,8 +66,7 @@ async fn main() -> Result<(), CLIError> {
     let tr = TraderConfigs::new("Config.toml").await;
 
     let i = Instant::now();
-    let ten_millis = Duration::from_millis(1000);
-    let handles = tr.trader_spawn(ten_millis, i).await;
+    let handles = tr.trader_spawn(i).await;
 
     for i in handles {
         i.await.unwrap();
