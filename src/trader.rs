@@ -1,16 +1,24 @@
+#[feature(arbitrary_self_types)]
+use apca::{
+    api::v2::order::{self, Order, Side, Type},
+    ApiInfo, Client,
+};
+use num_decimal::Num;
+use polars::{
+    io::SerReader,
+    prelude::{CsvReadOptions, DataFrame, NamedFrom},
+    series::Series,
+};
+use tracing_subscriber::registry::Data;
+
 use std::{
     collections::HashMap,
     fmt::{self},
     sync::Arc,
     thread,
     time::{self, Instant},
+    vec,
 };
-
-use apca::{
-    api::v2::order::{self, Order, Side, Type},
-    ApiInfo, Client,
-};
-use num_decimal::Num;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
@@ -43,7 +51,7 @@ impl fmt::Debug for TraderConf {
 }
 
 impl TraderConfigs {
-    pub async fn new(path: &str) -> Self {
+    pub async fn new(path: &str) -> Result<Self, CLIError> {
         let default_conf = AppConfig::default();
         let conf = default_conf.confload(path).unwrap();
 
@@ -59,18 +67,20 @@ impl TraderConfigs {
         let port = conf.grpcport;
         //setup multiple trader
         //benchmark them against each other
-        TraderConfigs {
+        Ok(TraderConfigs {
             conf_map: create_trader,
-            client: IndicatorClient::connect(port).await.unwrap(),
-        }
+            client: IndicatorClient::connect(port).await?,
+        })
     }
 
+    #[allow(dead_code)]
     async fn reconnect_client(mut self, port: &str) {
-        let addr = "http://[::1]:50051";
+        let mut addr = String::from("http://[::1]:");
+        addr.push_str(port);
         self.client = IndicatorClient::connect(addr).await.unwrap();
     }
 
-    pub async fn trader_spawn(self, now: Instant) -> Vec<JoinHandle<()>> {
+    pub async fn trader_spawn(self) -> Vec<JoinHandle<()>> {
         let arc = Arc::new(self);
         let mut treads: Vec<JoinHandle<()>> = vec![];
         for (symbol, trader_conf) in arc.conf_map.clone() {
@@ -79,7 +89,6 @@ impl TraderConfigs {
             //let client = (&self.trader).clone(); // Use `clone()` if `IndicatorClient` implements Clone
             let t = tokio::spawn(async move {
                 let ten_millis = time::Duration::from_millis(100);
-                let now = time::Instant::now();
 
                 thread::sleep(ten_millis);
                 self_clone.trader(&trader_conf).await;
@@ -89,15 +98,39 @@ impl TraderConfigs {
         treads
     }
 
+    async fn data_get(self: Arc<Self>, symbol: &str) -> Result<Vec<f64>, CLIError> {
+        let df = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+            .unwrap()
+            .finish()?;
+        //df.with_column(column("Close").cast::<Float64>())
+        //Date,Open,High,Low,Close,Adj Close,Volume
+        let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
+        Ok(close)
+    }
+
+    async fn data_append(
+        self: Arc<Self>,
+        data: DataFrame,
+        av: (String, Vec<f64>),
+    ) -> Result<Vec<f64>, CLIError> {
+        let df = data_append(data, av).await?;
+        //df.with_column(column("Close").cast::<Float64>())
+        //Date,Open,High,Low,Close,Adj Close,Volume
+        let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
+        Ok(close)
+    }
+
     async fn decision_point(
         self: Arc<Self>,
         indicator: proto::IndicatorType,
-        // mut client: IndicatorClient<Channel>,
     ) -> Result<Order, CLIError> {
-        let data = vec![4.0, 5.0, 6.0, 6.0, 6.0, 2.0];
+        let data = self.clone();
+
+        let datsa = data.data_get("ORCL").await?;
         let indicate = self
             .clone()
-            .grpc(indicator, String::from("ORCL"), data)
+            .grpc(indicator, String::from("ORCL"), datsa)
             .await;
         let desc = self.desision_maker(indicate);
         let ae = action_evaluator(desc);
@@ -106,6 +139,15 @@ impl TraderConfigs {
             Action::Sell => stock_sell(ae).await,
             _ => todo!(),
         }
+    }
+
+    async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
+        let mut c = self.client.clone();
+        let request = tonic::Request::new(req);
+        let ii = c.gen_liste(request).await.unwrap().into_inner().result;
+        //let ii = ii.;
+
+        ii
     }
 
     async fn grpc(
@@ -217,7 +259,34 @@ async fn stock_sell(av: ActionValuator) -> Result<Order, CLIError> {
     Ok(order)
 }
 
-#[derive(Clone, PartialEq)]
+fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
+    //"files/orcl.csv".into()
+    let df = CsvReadOptions::default()
+        .try_into_reader_with_file_path(Some(filename.into()))
+        .unwrap()
+        .finish()?;
+    Ok(df)
+    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
+}
+
+async fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
+    let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
+    Ok(i)
+    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
+}
+
+async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
+    let close = df[column]
+        .f64()
+        .unwrap()
+        .to_vec_null_aware()
+        .left()
+        .ok_or(CLIError::ConvertingError);
+    close
+    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
+}
+
+#[derive(Clone, PartialEq, Debug)]
 enum Action {
     Buy,
     Sell,
@@ -235,21 +304,23 @@ pub struct ActionValuator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
-        let mut gg = vec![HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)])];
+    #[tokio::test]
+    async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
+        let mut gg = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
 
         let hm = Indi {
             symbol: String::from("ORCL"),
             indicator: gg,
         };
+        let tr = TraderConfigs::new("Config.toml").await?;
+        let foo = Arc::new(tr);
+        let handles = foo.desision_maker(hm);
 
-        desision_maker(hm);
         //findReplace(hay, r"^ki");
         //let result = 2 + 2;
-        let o = AppConfig::default();
-        println!("{:?}", conf);
-        assert_eq!(conf, o);
+        //let o = AppConfig::default();
+        println!("{:?}", handles);
+        //assert_eq!(conf, o);
         Ok(())
     }
 
@@ -260,9 +331,54 @@ mod tests {
         action_evaluator(gg);
         //findReplace(hay, r"^ki");
         //let result = 2 + 2;
-        let o = AppConfig::default();
-        println!("{:?}", conf);
-        assert_eq!(conf, o);
+        //let o = AppConfig::default();
+        //println!("{:?}", conf);
+        //assert_eq!(conf, o);
+        Ok(())
+    }
+
+    /*  #[tokio::test]
+       async fn data_get_test() -> Result<DataFrame, Box<dyn std::error::Error>> {
+           let tr = TraderConfigs::new("Config.toml").await?;
+           let foo = Arc::new(tr);
+           let handles = data_csv(String::from("files/orcl.csv"));
+           println!("{:?}", handles);
+
+           //Ok(handles)
+           todo!()
+       }
+    */
+    #[tokio::test]
+    async fn data_grpc_get_test() -> Result<(), Box<dyn std::error::Error>> {
+        /*  let tr = TraderConfigs::new("Config.toml").await?;
+        let foo = Arc::new(tr);
+        let req = proto::ListNumbersRequest2 {
+            id: indicator.into(),
+            list: data,
+        };
+
+        foo.data_indicator_get(req); */
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn data_get_append_test() -> Result<(), Box<dyn std::error::Error>> {
+        //let data = data_csv(String::from("files/orcl.csv")).unwrap();
+        let df = data_csv(String::from("files/orcl.csv")).unwrap();
+        let tr = TraderConfigs::new("Config.toml").await?;
+        let foo = Arc::new(tr);
+
+        let data = df_to_vec(df.clone(), "Close").await?;
+        let req = proto::ListNumbersRequest2 {
+            id: IndicatorType::BollingerBands.into(),
+            list: data,
+        };
+        let oo = foo.clone().data_indicator_get(req).await;
+        println!("{:?}", oo);
+        let ii = (String::from("ORCL"), oo);
+        let oo = data_append(df, ii).await;
+        println!("{:?}", oo.unwrap().head(Some(3)));
         Ok(())
     }
 }

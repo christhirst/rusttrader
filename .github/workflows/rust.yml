@@ -72,7 +72,7 @@ jobs:
           context: .
           target: runtime
           push: true
-          tags: raynkami/rust.calc:v0.0.1
+          tags: raynkami/rust.trader:v0.0.1
           labels: rust.auto
 
   del_runs:

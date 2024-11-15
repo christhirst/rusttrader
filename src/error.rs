@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use polars::error::PolarsError;
 
 use crate::config::ConfigError;
 #[derive(thiserror::Error, Debug)]
@@ -18,6 +19,12 @@ pub enum CLIError {
 
     #[error("Config error")]
     ConsfigError(#[from] RequestError<CreateError>),
+
+    #[error("Tonic error")]
+    TonicError(#[from] tonic::transport::Error),
+
+    #[error("Polars error")]
+    PolarsError(#[from] PolarsError),
 }
 
 /* impl From<ConfigError> for CLIError {

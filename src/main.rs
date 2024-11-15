@@ -63,10 +63,8 @@ pub mod proto {
 
 #[tokio::main]
 async fn main() -> Result<(), CLIError> {
-    let tr = TraderConfigs::new("Config.toml").await;
-
-    let i = Instant::now();
-    let handles = tr.trader_spawn(i).await;
+    let tr = TraderConfigs::new("Config.toml").await?;
+    let handles = tr.trader_spawn().await;
 
     for i in handles {
         i.await.unwrap();
