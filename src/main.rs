@@ -8,6 +8,7 @@ use error::CLIError;
 use polars::prelude::*;
 use std::time::{Duration, Instant};
 use trader::TraderConfigs;
+
 mod alpaca_to_polars;
 mod config;
 mod error;

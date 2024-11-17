@@ -3,10 +3,11 @@ use apca::{
     api::v2::order::{self, Order, Side, Type},
     ApiInfo, Client,
 };
+
 use num_decimal::Num;
 use polars::{
     io::SerReader,
-    prelude::{CsvReadOptions, DataFrame, NamedFrom},
+    prelude::{col, lit, CsvReadOptions, DataFrame, IntoLazy, JoinArgs, LazyFrame, NamedFrom},
     series::Series,
 };
 use tracing_subscriber::registry::Data;
@@ -32,6 +33,11 @@ use crate::{
 pub struct TraderConf {
     symbol: String,
     indicator: Vec<proto::IndicatorType>,
+}
+
+struct Trade {
+    date: String,
+    Action: Action,
 }
 
 #[derive(Clone, Debug)]
@@ -98,23 +104,12 @@ impl TraderConfigs {
         treads
     }
 
-    async fn data_get(self: Arc<Self>, symbol: &str) -> Result<Vec<f64>, CLIError> {
-        let df = CsvReadOptions::default()
-            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
-            .unwrap()
-            .finish()?;
-        //df.with_column(column("Close").cast::<Float64>())
-        //Date,Open,High,Low,Close,Adj Close,Volume
-        let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
-        Ok(close)
-    }
-
     async fn data_append(
         self: Arc<Self>,
         data: DataFrame,
         av: (String, Vec<f64>),
     ) -> Result<Vec<f64>, CLIError> {
-        let df = data_append(data, av).await?;
+        let df = data_append(data, av)?;
         //df.with_column(column("Close").cast::<Float64>())
         //Date,Open,High,Low,Close,Adj Close,Volume
         let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
@@ -126,13 +121,20 @@ impl TraderConfigs {
         indicator: proto::IndicatorType,
     ) -> Result<Order, CLIError> {
         let data = self.clone();
+        let df = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+            .unwrap()
+            .finish()?;
+        let datsa = data_select_column("ORCL", df)?;
+        let datsa = data_select_column1(datsa, "Close")?;
 
-        let datsa = data.data_get("ORCL").await?;
         let indicate = self
             .clone()
             .grpc(indicator, String::from("ORCL"), datsa)
             .await;
-        let desc = self.desision_maker(indicate);
+        //TODO add dates
+
+        let desc = desision_maker(indicate);
         let ae = action_evaluator(desc);
         match ae.action {
             Action::Buy => stock_buy(ae).await,
@@ -185,29 +187,56 @@ impl TraderConfigs {
             self_clone.clone().decision_point(*i).await;
         }
     }
+}
 
-    fn desision_maker(self: Arc<Self>, indicator: Indi) -> Vec<Action> {
-        let mut action = vec![];
-        match indicator
-            .indicator
-            .get(&proto::IndicatorType::BollingerBands)
-        {
-            Some(x) => {
-                if *x > 0.1 {
-                    action.push(Action::Buy)
-                } else {
-                    action.push(Action::Sell)
-                }
+fn desision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
+    let actions_vec: Vec<u32> = indicator
+        .iter()
+        .map(|x| {
+            if *x > 2.14 {
+                Action::Buy as u32
+            } else {
+                Action::Sell as u32
             }
-            None => action.push(Action::Hold),
-        };
-        action
-    }
+        })
+        .collect();
+
+    actions_vec
+}
+
+fn desision_maker(indicator: Indi) -> Vec<Action> {
+    let mut action = vec![];
+    match indicator
+        .indicator
+        .get(&proto::IndicatorType::BollingerBands)
+    {
+        Some(x) => {
+            if *x > 0.1 {
+                action.push(Action::Buy)
+            } else {
+                action.push(Action::Sell)
+            }
+        }
+        None => action.push(Action::Hold),
+    };
+    action
 }
 
 struct Indi {
     symbol: String,
     indicator: HashMap<proto::IndicatorType, f64>,
+}
+
+fn data_select_column(column: &str, df: DataFrame) -> Result<DataFrame, CLIError> {
+    //df.with_column(column("Close").cast::<Float64>())
+    //Date,Open,High,Low,Close,Adj Close,Volume
+    let result = df
+        .clone()
+        .lazy()
+        .select([col("Date"), col(column)])
+        .collect()?;
+    //let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
+    Ok(result)
 }
 
 fn action_evaluator(av: Vec<Action>) -> ActionValuator {
@@ -269,8 +298,46 @@ fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
 }
 
-async fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
+fn data_filter(df: DataFrame) -> Result<DataFrame, CLIError> {
+    let filtered_df = df
+        .lazy()
+        .filter(col("Action").eq(Action::Sell as u32))
+        .collect()?;
+    Ok(filtered_df)
+}
+
+fn data_join(df: DataFrame, df1: DataFrame) -> Result<DataFrame, CLIError> {
+    // In Rust, we cannot use the shorthand of specifying a common
+    // column name just once.
+    let result = df
+        .clone()
+        .lazy()
+        .join(
+            df1.lazy(),
+            [col("Date")],
+            [col("Date")],
+            JoinArgs::default(),
+        )
+        .collect()?;
+    println!("{}", result);
+    Ok(result)
+}
+
+fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
     let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
+    Ok(i)
+    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
+}
+
+fn data_append2(mut df: DataFrame, av: (String, Vec<u32>)) -> Result<DataFrame, CLIError> {
+    let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
+    Ok(i)
+    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
+}
+
+/// Appends two DataFrames together horizontally.   
+async fn df_append(mut df: DataFrame, add: Series) -> Result<DataFrame, CLIError> {
+    let i = df.with_column(add).cloned()?;
     Ok(i)
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
 }
@@ -286,8 +353,20 @@ async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
 }
 
+fn data_select_column1(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
+    /* let df = CsvReadOptions::default()
+    .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+    .unwrap()
+    .finish()?; */
+    //df.with_column(column("Close").cast::<Float64>())
+    //Date,Open,High,Low,Close,Adj Close,Volume
+
+    let close: Vec<f64> = df[column].f64().unwrap().to_vec_null_aware().unwrap_left();
+    Ok(close)
+}
+
 #[derive(Clone, PartialEq, Debug)]
-enum Action {
+pub enum Action {
     Buy,
     Sell,
     Hold,
@@ -306,6 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
+        //let df = data_csv(String::from("files/orcl.csv")).unwrap();
         let mut gg = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
 
         let hm = Indi {
@@ -314,7 +394,7 @@ mod tests {
         };
         let tr = TraderConfigs::new("Config.toml").await?;
         let foo = Arc::new(tr);
-        let handles = foo.desision_maker(hm);
+        let handles = desision_maker(hm);
 
         //findReplace(hay, r"^ki");
         //let result = 2 + 2;
@@ -375,10 +455,41 @@ mod tests {
             list: data,
         };
         let oo = foo.clone().data_indicator_get(req).await;
-        println!("{:?}", oo);
-        let ii = (String::from("ORCL"), oo);
-        let oo = data_append(df, ii).await;
+        let ii = (String::from("BOL"), oo);
+        let oo = data_append(df, ii);
         println!("{:?}", oo.unwrap().head(Some(3)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn data__append_indicator_test() -> Result<(), Box<dyn std::error::Error>> {
+        //let data = data_csv(String::from("files/orcl.csv")).unwrap();
+        let df = data_csv(String::from("files/orcl.csv")).unwrap();
+        let tr = TraderConfigs::new("Config.toml").await?;
+        let foo = Arc::new(tr);
+        let data = df_to_vec(df.clone(), "Close").await?;
+        let req = proto::ListNumbersRequest2 {
+            id: IndicatorType::BollingerBands.into(),
+            list: data,
+        };
+
+        let oo = foo.clone().data_indicator_get(req).await;
+        let ii = (String::from("BOL"), oo);
+        let oo = data_append(df.clone(), ii)?;
+
+        let data = df_to_vec(oo.clone(), "Close").await?;
+
+        let actions = desision_maker_vec(data);
+        let ii = (String::from("Action"), actions);
+        let iw = data_append2(oo, ii)?;
+
+        /* let actions = desision_maker();
+        data_append(df); */
+
+        //let iis = (String::from("ACTION"), oo);
+        //let oo = data_select_column("Close");
+        let zz = data_filter(iw)?;
+        println!("{:?}", zz.head(Some(3)));
         Ok(())
     }
 }
