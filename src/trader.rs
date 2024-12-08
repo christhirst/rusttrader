@@ -17,7 +17,7 @@ use std::{
     fmt::{self},
     sync::Arc,
     thread,
-    time::{self, Instant},
+    time::{self},
     vec,
 };
 use tokio::task::JoinHandle;
@@ -26,7 +26,7 @@ use tonic::transport::Channel;
 use crate::{
     config::AppConfig,
     error::CLIError,
-    proto::{self, indicator_client::IndicatorClient, IndicatorType},
+    proto::{self, indicator_client::IndicatorClient, plot_client::PlotClient, IndicatorType},
 };
 
 #[derive(Clone)]

@@ -60,6 +60,7 @@ use proto::indicator_client::IndicatorClient;
 
 pub mod proto {
     tonic::include_proto!("calculate");
+    tonic::include_proto!("plots");
 }
 
 #[tokio::main]
