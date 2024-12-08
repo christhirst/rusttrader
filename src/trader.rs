@@ -126,12 +126,13 @@ impl TraderConfigs {
             .unwrap()
             .finish()?;
         let datsa = data_select_column("ORCL", df)?;
-        let datsa = data_select_column1(datsa, "Close")?;
+        let close = data_select_column1(datsa, "Close")?;
 
         let indicate = self
             .clone()
-            .grpc(indicator, String::from("ORCL"), datsa)
+            .grpc(indicator, String::from("ORCL"), close)
             .await;
+        print!("indicate: {:?}", indicate);
         //TODO add dates
 
         let desc = desision_maker(indicate);
@@ -143,13 +144,11 @@ impl TraderConfigs {
         }
     }
 
+    //
     async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
         let mut c = self.client.clone();
         let request = tonic::Request::new(req);
-        let ii = c.gen_liste(request).await.unwrap().into_inner().result;
-        //let ii = ii.;
-
-        ii
+        c.gen_liste(request).await.unwrap().into_inner().result
     }
 
     async fn grpc(
@@ -163,8 +162,13 @@ impl TraderConfigs {
         let mut c = self.client.clone();
         let handle = tokio::spawn(async move {
             println!("now running on a worker thread");
+            let opt = proto::Opt {
+                multiplier: 1.0,
+                period: 2,
+            };
             let req = proto::ListNumbersRequest2 {
                 id: indicator.into(),
+                opt: Some(opt),
                 list: data,
             };
             let request = tonic::Request::new(req);
@@ -189,11 +193,27 @@ impl TraderConfigs {
     }
 }
 
-fn desision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
+//TODO decisions as funcions
+fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
     let actions_vec: Vec<u32> = indicator
         .iter()
         .map(|x| {
             if *x > 2.14 {
+                Action::Buy as u32
+            } else {
+                Action::Sell as u32
+            }
+        })
+        .collect();
+
+    actions_vec
+}
+
+fn decision_bollingerBands(upperlower: Vec<(f64, f64, f64)>) -> Vec<u32> {
+    let actions_vec: Vec<u32> = upperlower
+        .iter()
+        .map(|(u, m, l)| {
+            if *u > 2.14 {
                 Action::Buy as u32
             } else {
                 Action::Sell as u32
@@ -222,6 +242,7 @@ fn desision_maker(indicator: Indi) -> Vec<Action> {
     action
 }
 
+#[derive(Clone, Debug)]
 struct Indi {
     symbol: String,
     indicator: HashMap<proto::IndicatorType, f64>,
@@ -452,6 +473,7 @@ mod tests {
         let data = df_to_vec(df.clone(), "Close").await?;
         let req = proto::ListNumbersRequest2 {
             id: IndicatorType::BollingerBands.into(),
+            opt: None,
             list: data,
         };
         let oo = foo.clone().data_indicator_get(req).await;
@@ -464,24 +486,42 @@ mod tests {
     #[tokio::test]
     async fn data__append_indicator_test() -> Result<(), Box<dyn std::error::Error>> {
         //let data = data_csv(String::from("files/orcl.csv")).unwrap();
-        let df = data_csv(String::from("files/orcl.csv")).unwrap();
+        let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
+        df = df.drop("Open").unwrap();
+        df = df.drop("High").unwrap();
+        df = df.drop("Low").unwrap();
+        df = df.drop("Adj Close").unwrap();
         let tr = TraderConfigs::new("Config.toml").await?;
         let foo = Arc::new(tr);
         let data = df_to_vec(df.clone(), "Close").await?;
+
+        let opt = proto::Opt {
+            multiplier: 2.0,
+            period: 5,
+        };
         let req = proto::ListNumbersRequest2 {
             id: IndicatorType::BollingerBands.into(),
+            opt: Some(opt),
             list: data,
         };
 
+        //get Indicator values as Vec<f64>
         let oo = foo.clone().data_indicator_get(req).await;
+
         let ii = (String::from("BOL"), oo);
+        //append Indicator data
         let oo = data_append(df.clone(), ii)?;
 
+        //get Indicator values as Vec<f64>
         let data = df_to_vec(oo.clone(), "Close").await?;
 
-        let actions = desision_maker_vec(data);
+        //get action values as Vec<u32>
+        let actions = decision_maker_vec(data);
+
         let ii = (String::from("Action"), actions);
+        //append Indicator data
         let iw = data_append2(oo, ii)?;
+        println!("{:?}", iw.tail(Some(3)));
 
         /* let actions = desision_maker();
         data_append(df); */
@@ -489,7 +529,9 @@ mod tests {
         //let iis = (String::from("ACTION"), oo);
         //let oo = data_select_column("Close");
         let zz = data_filter(iw)?;
-        println!("{:?}", zz.head(Some(3)));
+        println!("{:?}", zz.tail(Some(3)));
         Ok(())
     }
 }
+
+//PUT/CALL ratio, VIX, AAII Sentiment, Fear and Greed Index
