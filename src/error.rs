@@ -46,12 +46,12 @@ pub type Result<T> = std::result::Result<T, TaError>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TaError {
-    InvalidParameter,
+    /* InvalidParameter,
     DataItemIncomplete,
-    DataItemInvalid,
+    DataItemInvalid, */
 }
 
-impl Display for TaError {
+/* impl Display for TaError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match *self {
             TaError::InvalidParameter => write!(f, "invalid parameter"),
@@ -59,9 +59,9 @@ impl Display for TaError {
             TaError::DataItemInvalid => write!(f, "data item is invalid"),
         }
     }
-}
+} */
 
-impl Error for TaError {
+/* impl Error for TaError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             TaError::InvalidParameter => None,
@@ -69,4 +69,4 @@ impl Error for TaError {
             TaError::DataItemInvalid => None,
         }
     }
-}
+} */

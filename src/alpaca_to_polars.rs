@@ -10,7 +10,7 @@ use struct_iterable::Iterable;
 use crate::error::CLIError;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Iterable)]
-struct Sss {
+pub struct Sss {
     /// The beginning time of this bar.
     #[serde(rename = "t")]
     pub time: DateTime<Utc>,
@@ -49,12 +49,11 @@ pub struct S {
 }
 
 impl S {
-    pub fn loads(v: Vec<Sss>) -> Self {
-        let ii: Series =
-            Series::from_iter(v.iter().map(|b| b.close.to_f64().unwrap_or_default())).into();
+    /* pub fn loads(v: Vec<Sss>) -> Self {
+        let ii: Series = Series::from_iter(v.iter().map(|b| b.close.to_f64().unwrap_or_default()));
         println!("{}", ii);
         todo!()
-    }
+    } */
 }
 
 impl From<Vec<Bar>> for S {
@@ -94,7 +93,7 @@ impl From<Vec<Bar>> for S {
 
 fn struct_to_slice(s: &str, v: Vec<Bar>) -> Result<Series, CLIError> {
     let i = match s {
-        ("open" | "close" | "high" | "low") => {
+        "open" | "close" | "high" | "low" => {
             Series::from_iter(
                 v.iter()
                     .map(|b| {

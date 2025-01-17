@@ -39,9 +39,9 @@ impl Bar {
     }
 }
 
-pub fn round(num: f64) -> f64 {
+/* pub fn round(num: f64) -> f64 {
     (num * 1000.0).round() / 1000.00
-}
+} */
 
 macro_rules! test_indicator {
     ($i:tt) => {

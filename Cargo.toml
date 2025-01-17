@@ -8,6 +8,7 @@ polars = { version = "0.43", features = ["lazy","dynamic_group_by"]}
 chrono = "0.4"
 apca = "0.29"
 tokio = { version = "1.0", features = ["full"] }
+tokio-util = { version = "0.7.13", features = ["full"] }
 num-decimal = {version = "0.2.4", default-features = false, features = ["num-v04", "serde"]}
 serde = { version = "1.0", features = ["derive"] }
 struct_iterable = "0.1.1"

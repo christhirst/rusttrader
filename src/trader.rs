@@ -3,21 +3,18 @@ use apca::{
     api::v2::order::{self, Order, Side, Type},
     ApiInfo, Client,
 };
-
 use num_decimal::Num;
 use polars::{
     io::SerReader,
-    prelude::{col, lit, CsvReadOptions, DataFrame, IntoLazy, JoinArgs, LazyFrame, NamedFrom},
-    series::Series,
+    prelude::{col, CsvReadOptions, DataFrame, IntoLazy},
 };
-use tracing_subscriber::registry::Data;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use std::{
     collections::HashMap,
     fmt::{self},
     sync::Arc,
-    thread,
-    time::{self},
     vec,
 };
 use tokio::task::JoinHandle;
@@ -26,7 +23,7 @@ use tonic::transport::Channel;
 use crate::{
     config::AppConfig,
     error::CLIError,
-    proto::{self, indicator_client::IndicatorClient, plot_client::PlotClient, IndicatorType},
+    proto::{self, indicator_client::IndicatorClient, IndicatorType},
 };
 
 #[derive(Clone)]
@@ -35,15 +32,15 @@ pub struct TraderConf {
     indicator: Vec<proto::IndicatorType>,
 }
 
-struct Trade {
+/* struct Trade {
     date: String,
     Action: Action,
-}
+} */
 
 #[derive(Clone, Debug)]
 pub struct TraderConfigs {
     conf_map: HashMap<String, TraderConf>,
-    client: IndicatorClient<Channel>,
+    client: Option<IndicatorClient<Channel>>,
 }
 
 impl fmt::Debug for TraderConf {
@@ -73,38 +70,62 @@ impl TraderConfigs {
         let port = conf.grpcport;
         //setup multiple trader
         //benchmark them against each other
-        Ok(TraderConfigs {
-            conf_map: create_trader,
-            client: IndicatorClient::connect(port).await?,
-        })
+        match IndicatorClient::connect(port.clone()).await {
+            Ok(_client) => Ok(TraderConfigs {
+                conf_map: create_trader,
+                client: Some(IndicatorClient::connect(port).await?),
+            }),
+            Err(_e) => Ok(TraderConfigs {
+                conf_map: create_trader,
+                client: None,
+            }),
+        }
     }
 
     #[allow(dead_code)]
     async fn reconnect_client(mut self, port: &str) {
         let mut addr = String::from("http://[::1]:");
         addr.push_str(port);
-        self.client = IndicatorClient::connect(addr).await.unwrap();
+        self.client = Some(IndicatorClient::connect(addr).await.unwrap());
     }
 
+    //TODO CancellationToken
     pub async fn trader_spawn(self) -> Vec<JoinHandle<()>> {
+        let token = CancellationToken::new();
+
         let arc = Arc::new(self);
         let mut treads: Vec<JoinHandle<()>> = vec![];
-        for (symbol, trader_conf) in arc.conf_map.clone() {
+        for (_symbol, trader_conf) in arc.conf_map.clone() {
+            let cloned_token = token.clone();
             let self_clone = Arc::clone(&arc);
             // No need to clone if not using Arc
             //let client = (&self.trader).clone(); // Use `clone()` if `IndicatorClient` implements Clone
             let t = tokio::spawn(async move {
-                let ten_millis = time::Duration::from_millis(100);
+                tokio::select! {
+                    // Step 3: Using cloned token to listen to cancellation requests
+                    _ = cloned_token.cancelled() => {
+                        // The token was cancelled, task can shut down
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+
+                self_clone.trader(&trader_conf).await;
+                        // Long work has completed
+                    }
+                }
+
+                /* let ten_millis = time::Duration::from_millis(100);
 
                 thread::sleep(ten_millis);
-                self_clone.trader(&trader_conf).await;
+                self_clone.trader(&trader_conf).await; */
             });
             treads.push(t);
+            // Step 4: Cancel the original or cloned token to notify other tasks about shutting down gracefully
+            token.cancel();
         }
         treads
     }
 
-    async fn data_append(
+    /* async fn data_append(
         self: Arc<Self>,
         data: DataFrame,
         av: (String, Vec<f64>),
@@ -114,29 +135,26 @@ impl TraderConfigs {
         //Date,Open,High,Low,Close,Adj Close,Volume
         let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
         Ok(close)
-    }
+    } */
 
     async fn decision_point(
         self: Arc<Self>,
         indicator: proto::IndicatorType,
     ) -> Result<Order, CLIError> {
-        let data = self.clone();
+        //let data = self.clone();
         let df = CsvReadOptions::default()
             .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
             .unwrap()
             .finish()?;
         let datsa = data_select_column("ORCL", df)?;
         let close = data_select_column1(datsa, "Close")?;
-
-        let indicate = self
-            .clone()
-            .grpc(indicator, String::from("ORCL"), close)
-            .await;
+        let sym = String::from("ORCL");
+        let indicate = self.clone().grpc(indicator, sym.clone(), close).await;
         print!("indicate: {:?}", indicate);
         //TODO add dates
-
-        let desc = desision_maker(indicate);
-        let ae = action_evaluator(desc);
+        let indicator_selected = vec![proto::IndicatorType::BollingerBands];
+        let desc = desision_maker(indicate, indicator_selected);
+        let ae = action_evaluator(sym, desc);
         match ae.action {
             Action::Buy => stock_buy(ae).await,
             Action::Sell => stock_sell(ae).await,
@@ -145,11 +163,11 @@ impl TraderConfigs {
     }
 
     //
-    async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
-        let mut c = self.client.clone();
+    /* async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
+        let mut c = self.client.clone().unwrap();
         let request = tonic::Request::new(req);
         c.gen_liste(request).await.unwrap().into_inner().result
-    }
+    } */
 
     async fn grpc(
         self: Arc<Self>,
@@ -158,8 +176,9 @@ impl TraderConfigs {
         symbol: String,
         data: Vec<f64>,
     ) -> Indi {
+        let tracker = TaskTracker::new();
         let mut treads: Vec<JoinHandle<()>> = vec![];
-        let mut c = self.client.clone();
+        let mut c = self.client.clone().unwrap();
         let handle = tokio::spawn(async move {
             println!("now running on a worker thread");
             let opt = proto::Opt {
@@ -179,6 +198,12 @@ impl TraderConfigs {
         for i in treads {
             i.await.unwrap();
         }
+        // Once we spawned everything, we close the tracker.
+        tracker.close();
+
+        // Wait for everything to finish.
+        tracker.wait().await;
+
         Indi {
             symbol, //String::from("ORCL"),
             indicator: HashMap::new(),
@@ -188,12 +213,13 @@ impl TraderConfigs {
     async fn trader(self: Arc<Self>, conf: &TraderConf) {
         let self_clone = Arc::clone(&self);
         for i in conf.indicator.iter() {
-            self_clone.clone().decision_point(*i).await;
+            let _ = self_clone.clone().decision_point(*i).await;
         }
     }
 }
 
 //TODO decisions as funcions
+#[tracing::instrument]
 fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
     let actions_vec: Vec<u32> = indicator
         .iter()
@@ -209,10 +235,10 @@ fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
     actions_vec
 }
 
-fn decision_bollingerBands(upperlower: Vec<(f64, f64, f64)>) -> Vec<u32> {
+/* fn decision_bollinger_bands(upperlower: Vec<(f64, f64, f64)>) -> Vec<u32> {
     let actions_vec: Vec<u32> = upperlower
         .iter()
-        .map(|(u, m, l)| {
+        .map(|(u, _m, _l)| {
             if *u > 2.14 {
                 Action::Buy as u32
             } else {
@@ -222,23 +248,24 @@ fn decision_bollingerBands(upperlower: Vec<(f64, f64, f64)>) -> Vec<u32> {
         .collect();
 
     actions_vec
-}
+} */
 
-fn desision_maker(indicator: Indi) -> Vec<Action> {
+//evaluate all indicators
+fn desision_maker(indicator: Indi, indicator_select: Vec<proto::IndicatorType>) -> Vec<Action> {
     let mut action = vec![];
-    match indicator
-        .indicator
-        .get(&proto::IndicatorType::BollingerBands)
-    {
-        Some(x) => {
-            if *x > 0.1 {
-                action.push(Action::Buy)
-            } else {
-                action.push(Action::Sell)
+
+    for i in indicator_select {
+        match indicator.indicator.get(&i) {
+            Some(x) => {
+                if *x > 0.1 {
+                    action.push(Action::Buy)
+                } else {
+                    action.push(Action::Sell)
+                }
             }
-        }
-        None => action.push(Action::Hold),
-    };
+            None => action.push(Action::Hold),
+        };
+    }
     action
 }
 
@@ -260,18 +287,18 @@ fn data_select_column(column: &str, df: DataFrame) -> Result<DataFrame, CLIError
     Ok(result)
 }
 
-fn action_evaluator(av: Vec<Action>) -> ActionValuator {
+fn action_evaluator(symbol: String, av: Vec<Action>) -> ActionValuator {
     let buy_count = av.iter().filter(|x| **x == Action::Buy).count();
     let sell_count = av.iter().filter(|x| **x == Action::Sell).count();
     if buy_count > sell_count * 2 {
         ActionValuator {
-            symbol: String::from("ORCL"),
+            symbol: String::from(symbol),
             strength: 0.1,
             action: Action::Buy,
         }
     } else {
         ActionValuator {
-            symbol: String::from("ORCL"),
+            symbol: String::from(symbol),
             strength: 0.2,
             action: Action::Buy,
         }
@@ -309,7 +336,7 @@ async fn stock_sell(av: ActionValuator) -> Result<Order, CLIError> {
     Ok(order)
 }
 
-fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
+/* fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
     //"files/orcl.csv".into()
     let df = CsvReadOptions::default()
         .try_into_reader_with_file_path(Some(filename.into()))
@@ -317,17 +344,17 @@ fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
         .finish()?;
     Ok(df)
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}
+} */
 
-fn data_filter(df: DataFrame) -> Result<DataFrame, CLIError> {
+/* fn data_filter(df: DataFrame) -> Result<DataFrame, CLIError> {
     let filtered_df = df
         .lazy()
         .filter(col("Action").eq(Action::Sell as u32))
         .collect()?;
     Ok(filtered_df)
-}
+} */
 
-fn data_join(df: DataFrame, df1: DataFrame) -> Result<DataFrame, CLIError> {
+/* fn data_join(df: DataFrame, df1: DataFrame) -> Result<DataFrame, CLIError> {
     // In Rust, we cannot use the shorthand of specifying a common
     // column name just once.
     let result = df
@@ -342,28 +369,28 @@ fn data_join(df: DataFrame, df1: DataFrame) -> Result<DataFrame, CLIError> {
         .collect()?;
     println!("{}", result);
     Ok(result)
-}
+} */
 
-fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
+/* fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
     let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
     Ok(i)
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}
+} */
 
-fn data_append2(mut df: DataFrame, av: (String, Vec<u32>)) -> Result<DataFrame, CLIError> {
+/* fn data_append2(mut df: DataFrame, av: (String, Vec<u32>)) -> Result<DataFrame, CLIError> {
     let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
     Ok(i)
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}
+} */
 
 /// Appends two DataFrames together horizontally.   
-async fn df_append(mut df: DataFrame, add: Series) -> Result<DataFrame, CLIError> {
+/* async fn df_append(mut df: DataFrame, add: Series) -> Result<DataFrame, CLIError> {
     let i = df.with_column(add).cloned()?;
     Ok(i)
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}
+}*/
 
-async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
+/* async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
     let close = df[column]
         .f64()
         .unwrap()
@@ -372,7 +399,7 @@ async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
         .ok_or(CLIError::ConvertingError);
     close
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}
+} */
 
 fn data_select_column1(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
     /* let df = CsvReadOptions::default()
@@ -406,30 +433,22 @@ mod tests {
 
     #[tokio::test]
     async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
-        //let df = data_csv(String::from("files/orcl.csv")).unwrap();
-        let mut gg = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
-
+        let mut indicator_list = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
         let hm = Indi {
             symbol: String::from("ORCL"),
-            indicator: gg,
+            indicator: indicator_list,
         };
-        let tr = TraderConfigs::new("Config.toml").await?;
-        let foo = Arc::new(tr);
-        let handles = desision_maker(hm);
-
-        //findReplace(hay, r"^ki");
-        //let result = 2 + 2;
-        //let o = AppConfig::default();
-        println!("{:?}", handles);
-        //assert_eq!(conf, o);
+        let indicator_selected = vec![proto::IndicatorType::BollingerBands];
+        let handles = desision_maker(hm, indicator_selected);
+        assert_eq!(handles, vec![Action::Sell]);
         Ok(())
     }
 
     #[test]
     fn action_evaluator_test() -> Result<(), Box<dyn std::error::Error>> {
         let mut gg = vec![Action::Buy, Action::Buy, Action::Buy, Action::Sell];
-
-        action_evaluator(gg);
+        let sym = String::from("ORCL");
+        action_evaluator(sym, gg);
         //findReplace(hay, r"^ki");
         //let result = 2 + 2;
         //let o = AppConfig::default();
@@ -463,8 +482,9 @@ mod tests {
         Ok(())
     }
 
+    /*
     #[tokio::test]
-    async fn data_get_append_test() -> Result<(), Box<dyn std::error::Error>> {
+     async fn data_get_append_test() -> Result<(), Box<dyn std::error::Error>> {
         //let data = data_csv(String::from("files/orcl.csv")).unwrap();
         let df = data_csv(String::from("files/orcl.csv")).unwrap();
         let tr = TraderConfigs::new("Config.toml").await?;
@@ -481,10 +501,9 @@ mod tests {
         let oo = data_append(df, ii);
         println!("{:?}", oo.unwrap().head(Some(3)));
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn data__append_indicator_test() -> Result<(), Box<dyn std::error::Error>> {
+    } */
+    /*  #[tokio::test]
+    async fn data_append_indicator_test() -> Result<(), Box<dyn std::error::Error>> {
         //let data = data_csv(String::from("files/orcl.csv")).unwrap();
         let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
         df = df.drop("Open").unwrap();
@@ -531,7 +550,7 @@ mod tests {
         let zz = data_filter(iw)?;
         println!("{:?}", zz.tail(Some(3)));
         Ok(())
-    }
+    } */
 }
 
 //PUT/CALL ratio, VIX, AAII Sentiment, Fear and Greed Index
