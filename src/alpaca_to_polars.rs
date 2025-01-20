@@ -123,7 +123,7 @@ fn struct_to_slice(s: &str, v: Vec<Bar>) -> Result<Series, CLIError> {
     let dt = NaiveDate::from_ymd_opt(2016, 7, 8)
         .unwrap()
         .and_hms_opt(9, 10, 11)
-        .ok_or_else(|| CLIError::ConvertingError)?;
+        .ok_or_else(|| CLIError::Converting)?;
     let bc = v.iter().map(|_| dt).collect::<Vec<NaiveDateTime>>();
     let df = df!("time" => bc).unwrap();
 

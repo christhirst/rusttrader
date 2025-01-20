@@ -1,3 +1,4 @@
+use crate::config::ConfigError;
 use apca::{api::v2::order::CreateError, RequestError};
 use axum::{
     http::StatusCode,
@@ -5,26 +6,25 @@ use axum::{
 };
 use polars::error::PolarsError;
 
-use crate::config::ConfigError;
 #[derive(thiserror::Error, Debug)]
 pub enum CLIError {
     #[error("Database error")]
-    ConvertingError,
+    Converting,
 
     #[error("Config error")]
-    ConfigError(#[from] ConfigError),
+    Config(#[from] ConfigError),
 
     #[error("Failed to get data from Alpaca API")]
-    DBError(#[from] apca::RequestError<apca::data::v2::bars::ListError>),
+    DB(#[from] apca::RequestError<apca::data::v2::bars::ListError>),
 
     #[error("Config error")]
-    ConsfigError(#[from] RequestError<CreateError>),
+    Consfig(#[from] RequestError<CreateError>),
 
     #[error("Tonic error")]
-    TonicError(#[from] tonic::transport::Error),
+    Tonic(#[from] tonic::transport::Error),
 
     #[error("Polars error")]
-    PolarsError(#[from] PolarsError),
+    Polars(#[from] PolarsError),
 }
 
 /* impl From<ConfigError> for CLIError {
@@ -38,9 +38,6 @@ impl IntoResponse for CLIError {
         (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
     }
 }
-
-use std::error::Error;
-use std::fmt::{Display, Formatter};
 
 pub type Result<T> = std::result::Result<T, TaError>;
 

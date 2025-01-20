@@ -1,13 +1,7 @@
-#[feature(arbitrary_self_types)]
-use apca::{
-    api::v2::order::{self, Order, Side, Type},
-    ApiInfo, Client,
-};
-use num_decimal::Num;
-use polars::{
-    io::SerReader,
-    prelude::{col, CsvReadOptions, DataFrame, IntoLazy},
-};
+//#[feature(arbitrary_self_types)]
+use apca::api::v2::order::Order;
+
+use polars::{io::SerReader, prelude::CsvReadOptions};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -22,20 +16,14 @@ use tonic::transport::Channel;
 
 use crate::{
     config::AppConfig,
+    dataframe::{data_select_column, data_select_column1},
     error::CLIError,
+    helper::desision_maker,
+    indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, IndicatorType},
+    trade::{stock_buy, stock_sell},
+    types::{Action, Indi, TraderConf},
 };
-
-#[derive(Clone)]
-pub struct TraderConf {
-    symbol: String,
-    indicator: Vec<proto::IndicatorType>,
-}
-
-/* struct Trade {
-    date: String,
-    Action: Action,
-} */
 
 #[derive(Clone, Debug)]
 pub struct TraderConfigs {
@@ -162,13 +150,6 @@ impl TraderConfigs {
         }
     }
 
-    //
-    /* async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
-        let mut c = self.client.clone().unwrap();
-        let request = tonic::Request::new(req);
-        c.gen_liste(request).await.unwrap().into_inner().result
-    } */
-
     async fn grpc(
         self: Arc<Self>,
         indicator: IndicatorType,
@@ -218,256 +199,10 @@ impl TraderConfigs {
     }
 }
 
-//TODO decisions as funcions
-#[tracing::instrument]
-fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
-    let actions_vec: Vec<u32> = indicator
-        .iter()
-        .map(|x| {
-            if *x > 2.14 {
-                Action::Buy as u32
-            } else {
-                Action::Sell as u32
-            }
-        })
-        .collect();
-
-    actions_vec
-}
-
-/* fn decision_bollinger_bands(upperlower: Vec<(f64, f64, f64)>) -> Vec<u32> {
-    let actions_vec: Vec<u32> = upperlower
-        .iter()
-        .map(|(u, _m, _l)| {
-            if *u > 2.14 {
-                Action::Buy as u32
-            } else {
-                Action::Sell as u32
-            }
-        })
-        .collect();
-
-    actions_vec
-} */
-
-//evaluate all indicators
-fn desision_maker(indicator: Indi, indicator_select: Vec<proto::IndicatorType>) -> Vec<Action> {
-    let mut action = vec![];
-
-    for i in indicator_select {
-        match indicator.indicator.get(&i) {
-            Some(x) => {
-                if *x > 0.1 {
-                    action.push(Action::Buy)
-                } else {
-                    action.push(Action::Sell)
-                }
-            }
-            None => action.push(Action::Hold),
-        };
-    }
-    action
-}
-
-#[derive(Clone, Debug)]
-struct Indi {
-    symbol: String,
-    indicator: HashMap<proto::IndicatorType, f64>,
-}
-
-fn data_select_column(column: &str, df: DataFrame) -> Result<DataFrame, CLIError> {
-    //df.with_column(column("Close").cast::<Float64>())
-    //Date,Open,High,Low,Close,Adj Close,Volume
-    let result = df
-        .clone()
-        .lazy()
-        .select([col("Date"), col(column)])
-        .collect()?;
-    //let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
-    Ok(result)
-}
-
-fn action_evaluator(symbol: String, av: Vec<Action>) -> ActionValuator {
-    let buy_count = av.iter().filter(|x| **x == Action::Buy).count();
-    let sell_count = av.iter().filter(|x| **x == Action::Sell).count();
-    if buy_count > sell_count * 2 {
-        ActionValuator {
-            symbol: String::from(symbol),
-            strength: 0.1,
-            action: Action::Buy,
-        }
-    } else {
-        ActionValuator {
-            symbol: String::from(symbol),
-            strength: 0.2,
-            action: Action::Buy,
-        }
-    }
-}
-
-async fn stock_buy(av: ActionValuator) -> Result<Order, CLIError> {
-    let amount = (av.strength * 10.0) as i64;
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-    let request = order::CreateReqInit {
-        type_: Type::Limit,
-        limit_price: Some(Num::from(100)),
-        ..Default::default()
-    }
-    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
-
-    let order = client.issue::<order::Create>(&request).await?;
-    println!("order: {:#?}", order);
-    Ok(order)
-}
-async fn stock_sell(av: ActionValuator) -> Result<Order, CLIError> {
-    let amount = (av.strength * 10.0) as i64;
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-    let request = order::CreateReqInit {
-        type_: Type::Limit,
-        limit_price: Some(Num::from(100)),
-        ..Default::default()
-    }
-    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
-
-    let order = client.issue::<order::Create>(&request).await?;
-    println!("order: {:#?}", order);
-    Ok(order)
-}
-
-/* fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
-    //"files/orcl.csv".into()
-    let df = CsvReadOptions::default()
-        .try_into_reader_with_file_path(Some(filename.into()))
-        .unwrap()
-        .finish()?;
-    Ok(df)
-    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-} */
-
-/* fn data_filter(df: DataFrame) -> Result<DataFrame, CLIError> {
-    let filtered_df = df
-        .lazy()
-        .filter(col("Action").eq(Action::Sell as u32))
-        .collect()?;
-    Ok(filtered_df)
-} */
-
-/* fn data_join(df: DataFrame, df1: DataFrame) -> Result<DataFrame, CLIError> {
-    // In Rust, we cannot use the shorthand of specifying a common
-    // column name just once.
-    let result = df
-        .clone()
-        .lazy()
-        .join(
-            df1.lazy(),
-            [col("Date")],
-            [col("Date")],
-            JoinArgs::default(),
-        )
-        .collect()?;
-    println!("{}", result);
-    Ok(result)
-} */
-
-/* fn data_append(mut df: DataFrame, av: (String, Vec<f64>)) -> Result<DataFrame, CLIError> {
-    let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
-    Ok(i)
-    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-} */
-
-/* fn data_append2(mut df: DataFrame, av: (String, Vec<u32>)) -> Result<DataFrame, CLIError> {
-    let i = df.with_column(Series::new(av.0.into(), av.1)).cloned()?;
-    Ok(i)
-    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-} */
-
-/// Appends two DataFrames together horizontally.   
-/* async fn df_append(mut df: DataFrame, add: Series) -> Result<DataFrame, CLIError> {
-    let i = df.with_column(add).cloned()?;
-    Ok(i)
-    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-}*/
-
-/* async fn df_to_vec(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
-    let close = df[column]
-        .f64()
-        .unwrap()
-        .to_vec_null_aware()
-        .left()
-        .ok_or(CLIError::ConvertingError);
-    close
-    // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
-} */
-
-fn data_select_column1(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIError> {
-    /* let df = CsvReadOptions::default()
-    .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
-    .unwrap()
-    .finish()?; */
-    //df.with_column(column("Close").cast::<Float64>())
-    //Date,Open,High,Low,Close,Adj Close,Volume
-
-    let close: Vec<f64> = df[column].f64().unwrap().to_vec_null_aware().unwrap_left();
-    Ok(close)
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub enum Action {
-    Buy,
-    Sell,
-    Hold,
-}
-
-#[derive(Clone)]
-pub struct ActionValuator {
-    symbol: String,
-    strength: f64,
-    action: Action,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
-        let mut indicator_list = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
-        let hm = Indi {
-            symbol: String::from("ORCL"),
-            indicator: indicator_list,
-        };
-        let indicator_selected = vec![proto::IndicatorType::BollingerBands];
-        let handles = desision_maker(hm, indicator_selected);
-        assert_eq!(handles, vec![Action::Sell]);
-        Ok(())
-    }
-
-    #[test]
-    fn action_evaluator_test() -> Result<(), Box<dyn std::error::Error>> {
-        let mut gg = vec![Action::Buy, Action::Buy, Action::Buy, Action::Sell];
-        let sym = String::from("ORCL");
-        action_evaluator(sym, gg);
-        //findReplace(hay, r"^ki");
-        //let result = 2 + 2;
-        //let o = AppConfig::default();
-        //println!("{:?}", conf);
-        //assert_eq!(conf, o);
-        Ok(())
-    }
-
-    /*  #[tokio::test]
-       async fn data_get_test() -> Result<DataFrame, Box<dyn std::error::Error>> {
-           let tr = TraderConfigs::new("Config.toml").await?;
-           let foo = Arc::new(tr);
-           let handles = data_csv(String::from("files/orcl.csv"));
-           println!("{:?}", handles);
-
-           //Ok(handles)
-           todo!()
-       }
-    */
     #[tokio::test]
     async fn data_grpc_get_test() -> Result<(), Box<dyn std::error::Error>> {
         /*  let tr = TraderConfigs::new("Config.toml").await?;
