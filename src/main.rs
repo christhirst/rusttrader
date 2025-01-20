@@ -26,7 +26,7 @@ async fn main() -> Result<(), CLIError> {
     // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let tr = TraderConfigs::new("Config.toml").await?;
+    let tr = TraderConfigs::new("Config.toml", "ORCL").await?;
     let handles = tr.trader_spawn().await;
 
     for i in handles {

@@ -110,3 +110,73 @@ pub fn data_select_column1(df: DataFrame, column: &str) -> Result<Vec<f64>, CLIE
     close
     // let s0 = Series::new(av., av.values().cloned().collect::<Vec<f64>>());
 } */
+
+/*
+#[tokio::test]
+ async fn data_get_append_test() -> Result<(), Box<dyn std::error::Error>> {
+    //let data = data_csv(String::from("files/orcl.csv")).unwrap();
+    let df = data_csv(String::from("files/orcl.csv")).unwrap();
+    let tr = TraderConfigs::new("Config.toml").await?;
+    let foo = Arc::new(tr);
+
+    let data = df_to_vec(df.clone(), "Close").await?;
+    let req = proto::ListNumbersRequest2 {
+        id: IndicatorType::BollingerBands.into(),
+        opt: None,
+        list: data,
+    };
+    let oo = foo.clone().data_indicator_get(req).await;
+    let ii = (String::from("BOL"), oo);
+    let oo = data_append(df, ii);
+    println!("{:?}", oo.unwrap().head(Some(3)));
+    Ok(())
+} */
+/*  #[tokio::test]
+async fn data_append_indicator_test() -> Result<(), Box<dyn std::error::Error>> {
+    //let data = data_csv(String::from("files/orcl.csv")).unwrap();
+    let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
+    df = df.drop("Open").unwrap();
+    df = df.drop("High").unwrap();
+    df = df.drop("Low").unwrap();
+    df = df.drop("Adj Close").unwrap();
+    let tr = TraderConfigs::new("Config.toml").await?;
+    let foo = Arc::new(tr);
+    let data = df_to_vec(df.clone(), "Close").await?;
+
+    let opt = proto::Opt {
+        multiplier: 2.0,
+        period: 5,
+    };
+    let req = proto::ListNumbersRequest2 {
+        id: IndicatorType::BollingerBands.into(),
+        opt: Some(opt),
+        list: data,
+    };
+
+    //get Indicator values as Vec<f64>
+    let oo = foo.clone().data_indicator_get(req).await;
+
+    let ii = (String::from("BOL"), oo);
+    //append Indicator data
+    let oo = data_append(df.clone(), ii)?;
+
+    //get Indicator values as Vec<f64>
+    let data = df_to_vec(oo.clone(), "Close").await?;
+
+    //get action values as Vec<u32>
+    let actions = decision_maker_vec(data);
+
+    let ii = (String::from("Action"), actions);
+    //append Indicator data
+    let iw = data_append2(oo, ii)?;
+    println!("{:?}", iw.tail(Some(3)));
+
+    /* let actions = desision_maker();
+    data_append(df); */
+
+    //let iis = (String::from("ACTION"), oo);
+    //let oo = data_select_column("Close");
+    let zz = data_filter(iw)?;
+    println!("{:?}", zz.tail(Some(3)));
+    Ok(())
+} */
