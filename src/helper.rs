@@ -1,14 +1,4 @@
-use polars::{frame::DataFrame, io::SerReader, prelude::CsvReadOptions};
-
-use crate::{error::CLIError, proto, types::Action, types::Indi};
-
-pub fn data_csv(filename: String) -> Result<DataFrame, CLIError> {
-    let df = CsvReadOptions::default()
-        .try_into_reader_with_file_path(Some(filename.into()))
-        .unwrap()
-        .finish()?;
-    Ok(df)
-}
+use crate::{proto, types::Action, types::Indi};
 
 //TODO decisions as funcions
 #[tracing::instrument]
@@ -46,14 +36,10 @@ pub fn desision_maker(indicator: Indi, indicator_select: Vec<proto::IndicatorTyp
     action
 }
 
-/* async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
-    let mut c = self.client.clone().unwrap();
-    let request = tonic::Request::new(req);
-    c.gen_liste(request).await.unwrap().into_inner().result
-} */
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[tokio::test]
@@ -66,14 +52,6 @@ mod tests {
         let indicator_selected = vec![proto::IndicatorType::BollingerBands];
         let handles = desision_maker(hm, indicator_selected);
         assert_eq!(handles, vec![Action::Sell]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn data_get_test() -> Result<(), Box<dyn std::error::Error>> {
-        let df = data_csv(String::from("files/orcl.csv"));
-        //println!("{:?}", df);
-        assert!(df.is_ok());
         Ok(())
     }
 }

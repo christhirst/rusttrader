@@ -1,7 +1,9 @@
 //#[feature(arbitrary_self_types)]
 use apca::api::v2::order::Order;
 
-use polars::{io::SerReader, prelude::CsvReadOptions};
+use axum::async_trait;
+use mockall::automock;
+use polars::{frame::DataFrame, io::SerReader, prelude::CsvReadOptions, prelude::*};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -20,10 +22,104 @@ use crate::{
     error::CLIError,
     helper::desision_maker,
     indicator_decision::action_evaluator,
-    proto::{self, indicator_client::IndicatorClient, IndicatorType},
-    trade::{stock_buy, stock_sell},
+    proto::{self, indicator_client::IndicatorClient, IndicatorType, ListNumbersRequest2},
+    trade::{stock_buy, stock_sell, StockActions},
     types::{Action, Indi, TraderConf},
 };
+
+#[automock]
+//#[async_trait]
+trait Calc {
+    async fn grpc(
+        self: Arc<Self>,
+        indicator: IndicatorType,
+        //ii: IndicatorClient<Channel>,
+        symbol: String,
+        data: Vec<f64>,
+    ) -> Indi;
+
+    async fn decision_point(
+        self: Arc<Self>,
+        indicator: proto::IndicatorType,
+
+        df: DataFrame,
+        sym: String,
+    ) -> Result<(), CLIError>;
+}
+
+impl Calc for TraderConfigs {
+    async fn grpc(
+        self: Arc<Self>,
+        indicator: IndicatorType,
+        //ii: IndicatorClient<Channel>,
+        symbol: String,
+        data: Vec<f64>,
+    ) -> Indi {
+        let tracker = TaskTracker::new();
+        let mut treads: Vec<JoinHandle<()>> = vec![];
+
+        let mut c = self.client.clone().unwrap();
+
+        //println!("data: {:#?}", data);
+        let ee = Vec::from([1.0, 2.0, 3.0]);
+        let handle = tokio::spawn(async move {
+            println!("now running on a worker thread");
+            let opt = proto::Opt {
+                multiplier: 1.0,
+                period: 2,
+            };
+            let req = ListNumbersRequest2 {
+                id: 2, //indicator.into(),
+                opt: Some(opt),
+                list: data,
+            };
+            //println!("req: {:#?}", req);
+            //let request = tonic::Request::new(req);
+
+            let test = c.gen_liste(req).await.unwrap();
+            println!("test: {:#?}", test);
+        });
+        treads.push(handle);
+
+        for i in treads {
+            i.await.unwrap();
+        }
+        // Once we spawned everything, we close the tracker.
+        tracker.close();
+
+        // Wait for everything to finish.
+        tracker.wait().await;
+
+        Indi {
+            symbol, //String::from("ORCL"),
+            indicator: HashMap::new(),
+        }
+    }
+
+    async fn decision_point(
+        self: Arc<Self>,
+        indicator: proto::IndicatorType,
+        df: DataFrame,
+        sym: String,
+    ) -> Result<(), CLIError> {
+        //let data = self.clone();
+        //let datsa = data_select_column("ORCL", df)?;
+        let close = data_select_column1(df, "Close")?;
+        //let sym = String::from("ORCL");
+        let indicate = self.clone().grpc(indicator, sym.clone(), close).await;
+        print!("indicate: {:?}", indicate);
+        //TODO add dates
+        let indicator_selected = vec![proto::IndicatorType::BollingerBands];
+        let desc = desision_maker(indicate, indicator_selected);
+        let ae = action_evaluator(sym, desc);
+
+        match ae.action {
+            Action::Buy => self.stock_buy(ae).await,
+            Action::Sell => self.stock_sell(ae).await,
+            _ => todo!(),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct TraderConfigs {
@@ -42,7 +138,11 @@ impl fmt::Debug for TraderConf {
 }
 
 impl TraderConfigs {
-    pub async fn new(path: &str, sym: &str) -> Result<Self, CLIError> {
+    pub async fn new(
+        path: &str,
+        client: Option<IndicatorClient<Channel>>,
+        sym: &str,
+    ) -> Result<Self, CLIError> {
         let default_conf = AppConfig::default();
         let conf = default_conf.confload(path).unwrap();
 
@@ -58,15 +158,13 @@ impl TraderConfigs {
         let port = conf.grpcport;
         //setup multiple trader
         //benchmark them against each other
-        match IndicatorClient::connect(port.clone()).await {
-            Ok(_client) => Ok(TraderConfigs {
+        if let Some(client) = client {
+            Ok(TraderConfigs {
                 conf_map: create_trader,
-                client: Some(IndicatorClient::connect(port).await?),
-            }),
-            Err(_e) => Ok(TraderConfigs {
-                conf_map: create_trader,
-                client: None,
-            }),
+                client: Some(client),
+            })
+        } else {
+            Err(CLIError::Converting)
         }
     }
 
@@ -131,15 +229,13 @@ impl TraderConfigs {
     async fn decision_point(
         self: Arc<Self>,
         indicator: proto::IndicatorType,
-    ) -> Result<Order, CLIError> {
+        df: DataFrame,
+        sym: String,
+    ) -> Result<(), CLIError> {
         //let data = self.clone();
-        let df = CsvReadOptions::default()
-            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
-            .unwrap()
-            .finish()?;
-        let datsa = data_select_column("ORCL", df)?;
-        let close = data_select_column1(datsa, "Close")?;
-        let sym = String::from("ORCL");
+        //let datsa = data_select_column("ORCL", df)?;
+        let close = data_select_column1(df, "Close")?;
+        //let sym = String::from("ORCL");
         let indicate = self.clone().grpc(indicator, sym.clone(), close).await;
         print!("indicate: {:?}", indicate);
         //TODO add dates
@@ -153,7 +249,7 @@ impl TraderConfigs {
         }
     }
 
-    async fn grpc(
+    /* async fn grpc(
         self: Arc<Self>,
         indicator: IndicatorType,
         //ii: IndicatorClient<Channel>,
@@ -192,42 +288,156 @@ impl TraderConfigs {
             symbol, //String::from("ORCL"),
             indicator: HashMap::new(),
         }
+    } */
+
+    async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
+        let mut c = self.client.clone().unwrap();
+        let request = tonic::Request::new(req);
+        c.gen_liste(request).await.unwrap().into_inner().result
     }
 
-    async fn trader(self: Arc<Self>, trader_conf: &TraderConf) {
+    async fn trader(self: Arc<Self>, trader_conf: &TraderConf) -> Result<(), CLIError> {
         let self_clone = Arc::clone(&self);
         for i in trader_conf.indicator.iter() {
             //get data from csv or grpc
+            let df = CsvReadOptions::default()
+                .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+                .unwrap()
+                .finish()?;
+
             //check with indicator
             //evaluate action
             //execute action
-            let _ = self_clone.clone().decision_point(*i).await;
+            let _ = self_clone
+                .clone()
+                .decision_point(*i, df, "".to_string())
+                .await;
         }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alpaca_to_polars::S;
+    use crate::trade::MockStockActions;
+    use grpcmock::generate_server;
+    use grpcmock::prelude::*;
+    use grpcmock::server;
+
+    use proto::*;
+    use proto::{indicator_client::IndicatorClient, ListNumbersRequest2, ListNumbersResponse};
+    use tonic::transport::Channel;
+
+    // Generate server `MockHelloServer` for the `calculate.Indicator` service.
+    generate_server!("calculate.Indicator", MockCalculateServer);
 
     #[tokio::test]
-    async fn new() -> Result<(), Box<dyn std::error::Error>> {
-        let tr = TraderConfigs::new("Config.toml", "ORCL").await?;
+    async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
+        //new TraderConfig
+        let tr = Arc::new(TraderConfigs::new("Config.toml", None, "ORCL").await?);
+        //get symbol
+        let conf_tr = tr.conf_map.get("ORCL");
+        //check config exists
+        assert!(conf_tr.is_some());
+        Ok(())
+    }
 
-        let foo = Arc::new(tr);
+    #[tokio::test]
+    async fn decision_point_test() -> Result<(), Box<dyn std::error::Error>> {
+        // Create a new MockSet
+        let mut mocks = MockSet::new();
 
-        /* let req = proto::ListNumbersRequest2 {
-            id: indicator.into(),
-            list: data,
-        }; */
+        // Load and insert mocks from mock files
+        // NOTE: generic type parameters correspond to prost-generated input and output types of the method.
+        mocks.insert(
+            GrpcMethod::new("calculate.Indicator", "GenListe")?,
+            Mock::new(
+                ListNumbersRequest2 {
+                    id: 2,
+                    opt: Some(proto::Opt {
+                        multiplier: 1.0,
+                        period: 2,
+                    }),
+                    list: Vec::from([1.0, 2.0, 3.0]),
+                },
+                ListNumbersResponse {
+                    result: Vec::from([1.0, 2.0, 3.0]),
+                },
+            ),
+        );
 
-        foo.data_indicator_get(req);
+        // Start mock server
+        let server = MockCalculateServer::start(mocks).await?;
 
+        // Create mock client
+        let channel = Channel::from_shared(format!("http://0.0.0.0:{}", server.addr().port()))?
+            .connect()
+            .await?;
+        let mut client = IndicatorClient::new(channel);
+        /* let result = client
+        .gen_liste(ListNumbersRequest2 {
+            id: 2,
+            opt: Some(proto::Opt {
+                multiplier: 1.0,
+                period: 2,
+            }),
+            list: Vec::from([1.0, 2.0, 3.0]),
+        })
+        .await
+        .unwrap(); */
+        //println!("result: {:#?}", result);
+        //return value for grpc mock
+        //let test = c.gen_liste(req).await.unwrap();
+        //decison_point params
+        let indicator = proto::IndicatorType::BollingerBands;
+        let sym = String::from("ORCL");
+        //data get from file
+        let df = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+            .unwrap()
+            .finish()?;
+        //decison_point test
+        let df = DataFrame::default();
+        let s = Series::new("Close".into(), &[1.0, 2.0, 3.0]);
+
+        let df = DataFrame::new(vec![s]).unwrap();
+
+        let tr = TraderConfigs::new("Config.toml", Some(client), "ORCL").await?;
+        let arc_tr = Arc::new(tr);
+
+        let arc_mock = arc_tr.decision_point(indicator, df, sym).await;
+
+        //data get from file
+
+        //let sym = String::from("ORCL");
+
+        //config read from file
+        //let tr = Arc::new(TraderConfigs::new("Config.toml", &sym).await?);
+
+        //let dp = arc_mock.decision_point(indicator, df, sym).await;
+        //println!("dp: {:#?}", dp);
+        assert!(true);
         Ok(())
     }
 
     #[tokio::test]
     async fn data_grpc_get_test() -> Result<(), Box<dyn std::error::Error>> {
+        /*  let tr = TraderConfigs::new("Config.toml").await?;
+        let foo = Arc::new(tr);
+        let req = proto::ListNumbersRequest2 {
+            id: indicator.into(),
+            list: data,
+        };
+
+        foo.data_indicator_get(req); */
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn trader_test() -> Result<(), Box<dyn std::error::Error>> {
         /*  let tr = TraderConfigs::new("Config.toml").await?;
         let foo = Arc::new(tr);
         let req = proto::ListNumbersRequest2 {

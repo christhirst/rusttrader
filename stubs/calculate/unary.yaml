@@ -1,0 +1,12 @@
+# @format
+
+service: "calculate.Indicator" # fully-qualified gRPC service name
+method: "GenListe" # gRPC method name
+mocks:
+  - request:
+      body: "" # JSON string, [''] for streaming
+    response:
+      code: 200 # optional, default=200
+      body: "" # JSON string, [''] for streaming
+      headers: {} # optional
+      error: "" # optional
