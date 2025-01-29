@@ -10,6 +10,7 @@ pub struct Indi {
 #[derive(Clone)]
 pub struct TraderConf {
     pub symbol: String,
+    pub price_label: String,
     pub indicator: Vec<proto::IndicatorType>,
 }
 
