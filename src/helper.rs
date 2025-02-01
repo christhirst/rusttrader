@@ -1,4 +1,7 @@
-use crate::{proto, types::Action, types::Indi};
+use crate::{
+    proto,
+    types::{Action, Indi, IndiValidate},
+};
 
 //TODO decisions as funcions
 #[tracing::instrument]
@@ -18,21 +21,26 @@ fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
 }
 
 //evaluate all indicators
-pub fn desision_maker(indicator: Indi, indicator_select: Vec<proto::IndicatorType>) -> Vec<Action> {
+pub fn desision_maker(indicator: Indi, indicagor_val: IndiValidate) -> Vec<Action> {
     let mut action = vec![];
+    //let eval = indicagor_val.validate.get(&indicator.symbol).unwrap();
 
-    for i in indicator_select {
-        match indicator.indicator.get(&i) {
-            Some(x) => {
-                if *x > 0.1 {
-                    action.push(Action::Buy)
-                } else {
-                    action.push(Action::Sell)
+    if let Some(eval) = indicagor_val.validate.get(&indicator.symbol) {
+        for i in indicator.indicator.iter() {
+            match indicator.indicator.get(i.0) {
+                Some(x) => {
+                    let o = eval.get(i.0).unwrap();
+                    if *x > *o {
+                        action.push(Action::Buy)
+                    } else {
+                        action.push(Action::Sell)
+                    }
                 }
-            }
-            None => action.push(Action::Hold),
-        };
+                None => action.push(Action::Hold),
+            };
+        }
     }
+
     action
 }
 
@@ -44,12 +52,18 @@ mod tests {
 
     #[tokio::test]
     async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
+        let sym = String::from("ORCL");
         let mut indicator_list = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
         let hm = Indi {
-            symbol: String::from("ORCL"),
+            symbol: sym.clone(),
             indicator: indicator_list,
         };
-        let indicator_selected = vec![proto::IndicatorType::BollingerBands];
+        let indicator_selected = IndiValidate {
+            validate: HashMap::from([(
+                sym,
+                HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
+            )]),
+        };
         let handles = desision_maker(hm, indicator_selected);
         assert_eq!(handles, vec![Action::Sell]);
         Ok(())

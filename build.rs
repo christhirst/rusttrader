@@ -10,12 +10,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             "#[derive(serde::Deserialize)] #[serde(rename_all = \"snake_case\")]",
         )
         .file_descriptor_set_path(out_dir.join("indicator_descriptor.bin"))
-        .compile(&["proto/indicators.proto"], &["proto"])?;
+        .compile_protos(&["proto/indicators.proto"], &["proto"])?;
     tonic_build::compile_protos("proto/indicators.proto")?;
 
     tonic_build::configure()
         .file_descriptor_set_path(out_dir.join("plot_descriptor.bin"))
-        .compile(&["proto/plot.proto"], &["proto"])?;
+        .compile_protos(&["proto/plot.proto"], &["proto"])?;
     tonic_build::compile_protos("proto/plot.proto")?;
 
     Ok(())

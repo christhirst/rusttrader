@@ -7,6 +7,11 @@ pub struct Indi {
     pub indicator: HashMap<proto::IndicatorType, f64>,
 }
 
+#[derive(Clone, Debug)]
+pub struct IndiValidate {
+    pub validate: HashMap<String, HashMap<proto::IndicatorType, f64>>,
+}
+
 #[derive(Clone)]
 pub struct TraderConf {
     pub symbol: String,

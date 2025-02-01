@@ -1,5 +1,5 @@
 use apca::{
-    api::v2::order::{self, Order, Side, Type},
+    api::v2::order::{self, Side, Type},
     ApiInfo, Client,
 };
 use mockall::automock;
