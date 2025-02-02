@@ -24,7 +24,7 @@ use crate::{
     indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, ListNumbersRequest2},
     trade::StockActions,
-    types::{Action, Indi, IndiValidate, TraderConf},
+    types::{Action, ActionEval, ActionValidate, Indi, IndiValidate, TraderConf},
 };
 
 #[automock]
@@ -96,8 +96,17 @@ impl Calc for TraderConfigs {
                 HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
             )]),
         };
+
         let desc = desision_maker(indicate, indicator_selected);
-        let ae = action_evaluator(conf.symbol.clone(), desc);
+        //TODO
+        let i = ActionValidate {
+            validate: HashMap::from([
+                (String::from("ORCL"), ActionEval::Buy(0.1)),
+                (String::from("ORCL"), ActionEval::Sell(0.2)),
+                (String::from("ORCL"), ActionEval::Hold(0.3)),
+            ]),
+        };
+        let ae = action_evaluator(conf.symbol.clone(), i, desc);
 
         match ae.action {
             Action::Buy => self.stock_buy(ae).await,

@@ -12,6 +12,18 @@ pub struct IndiValidate {
     pub validate: HashMap<String, HashMap<proto::IndicatorType, f64>>,
 }
 
+#[derive(Clone, Debug)]
+pub enum ActionEval {
+    Buy(f32),
+    Sell(f32),
+    Hold(f32),
+}
+
+#[derive(Clone, Debug)]
+pub struct ActionValidate {
+    pub validate: HashMap<String, ActionEval>,
+}
+
 #[derive(Clone)]
 pub struct TraderConf {
     pub symbol: String,

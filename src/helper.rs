@@ -20,14 +20,14 @@ fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
     actions_vec
 }
 
-//evaluate all indicators
-pub fn desision_maker(indicator: Indi, indicagor_val: IndiValidate) -> Vec<Action> {
+//Evaluate all indicators
+//Indicator are the values to evaluate with indicagor_val
+pub fn desision_maker(indicator_values: Indi, indicator_eval: IndiValidate) -> Vec<Action> {
     let mut action = vec![];
-    //let eval = indicagor_val.validate.get(&indicator.symbol).unwrap();
 
-    if let Some(eval) = indicagor_val.validate.get(&indicator.symbol) {
-        for i in indicator.indicator.iter() {
-            match indicator.indicator.get(i.0) {
+    if let Some(eval) = indicator_eval.validate.get(&indicator_values.symbol) {
+        for i in indicator_values.indicator.iter() {
+            match indicator_values.indicator.get(i.0) {
                 Some(x) => {
                     let o = eval.get(i.0).unwrap();
                     if *x > *o {
@@ -46,9 +46,8 @@ pub fn desision_maker(indicator: Indi, indicagor_val: IndiValidate) -> Vec<Actio
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn desision_maker_test() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,12 +59,22 @@ mod tests {
         };
         let indicator_selected = IndiValidate {
             validate: HashMap::from([(
-                sym,
+                sym.clone(),
                 HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
             )]),
         };
-        let handles = desision_maker(hm, indicator_selected);
+        let handles = desision_maker(hm.clone(), indicator_selected);
         assert_eq!(handles, vec![Action::Sell]);
+
+        let indicator_selected = IndiValidate {
+            validate: HashMap::from([(
+                sym,
+                HashMap::from([(proto::IndicatorType::BollingerBands, 0.01)]),
+            )]),
+        };
+        let handles = desision_maker(hm, indicator_selected);
+        assert_eq!(handles, vec![Action::Buy]);
+
         Ok(())
     }
 }
