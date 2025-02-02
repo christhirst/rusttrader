@@ -1,11 +1,10 @@
 //#[feature(arbitrary_self_types)]
 
-use axum::Error;
 use mockall::automock;
 use polars::{frame::DataFrame, io::SerReader, prelude::CsvReadOptions};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{error, info};
+use tracing::error;
 
 use std::{
     collections::HashMap,
@@ -24,7 +23,7 @@ use crate::{
     indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, ListNumbersRequest2},
     trade::StockActions,
-    types::{Action, ActionEval, ActionValidate, Indi, IndiValidate, TraderConf},
+    types::{Action, ActionConfig, ActionEval, ActionValidate, Indi, IndiValidate, TraderConf},
 };
 
 #[automock]
@@ -85,28 +84,32 @@ impl Calc for TraderConfigs {
         conf: &TraderConf,
         df: DataFrame,
         req: ListNumbersRequest2,
+
         col: &str,
     ) -> Result<(), CLIError> {
         let indicate = self.clone().grpc(req, conf.symbol.clone()).await;
 
         //TODO add dates
-        let indicator_selected = IndiValidate {
-            validate: HashMap::from([(
-                String::from("ORCL"),
-                HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
-            )]),
-        };
 
-        let desc = desision_maker(indicate, indicator_selected);
+        let desc = desision_maker(
+            indicate,
+            self.stock_indicators
+                .clone()
+                .unwrap()
+                .indi_validate
+                .unwrap(),
+        );
         //TODO
-        let i = ActionValidate {
-            validate: HashMap::from([
-                (String::from("ORCL"), ActionEval::Buy(0.1)),
-                (String::from("ORCL"), ActionEval::Sell(0.2)),
-                (String::from("ORCL"), ActionEval::Hold(0.3)),
-            ]),
-        };
-        let ae = action_evaluator(conf.symbol.clone(), i, desc);
+
+        let ae = action_evaluator(
+            conf.symbol.clone(),
+            self.stock_indicators
+                .clone()
+                .unwrap()
+                .action_validate
+                .unwrap(),
+            desc,
+        );
 
         match ae.action {
             Action::Buy => self.stock_buy(ae).await,
@@ -123,6 +126,7 @@ impl Calc for TraderConfigs {
 pub struct TraderConfigs {
     conf_map: HashMap<String, TraderConf>,
     client: Option<IndicatorClient<Channel>>,
+    stock_indicators: Option<ActionConfig>,
 }
 
 impl fmt::Debug for TraderConf {
@@ -161,6 +165,7 @@ impl TraderConfigs {
             Ok(TraderConfigs {
                 conf_map: create_trader,
                 client: Some(client),
+                stock_indicators: None,
             })
         } else {
             Err(CLIError::Converting)
@@ -172,6 +177,28 @@ impl TraderConfigs {
         let mut addr = String::from("http://[::1]:");
         addr.push_str(port);
         self.client = Some(IndicatorClient::connect(addr).await.unwrap());
+    }
+
+    #[allow(dead_code)]
+    async fn pull_stock_data(mut self) -> Result<ActionConfig, CLIError> {
+        //TODO pull data from database
+
+        Ok(ActionConfig {
+            action_validate: Some(ActionValidate {
+                validate: HashMap::from([
+                    (String::from("ORCL"), ActionEval::Buy(0.1)),
+                    (String::from("ORCL"), ActionEval::Sell(0.2)),
+                    (String::from("ORCL"), ActionEval::Hold(0.3)),
+                ]),
+            }),
+
+            indi_validate: Some(IndiValidate {
+                validate: HashMap::from([(
+                    String::from("ORCL"),
+                    HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
+                )]),
+            }),
+        })
     }
 
     //TODO CancellationToken
@@ -225,27 +252,6 @@ impl TraderConfigs {
         Ok(close)
     } */
 
-    /* async fn decision_point(
-        self: Arc<Self>,
-        conf: &TraderConf,
-        df: DataFrame,
-    ) -> Result<(), CLIError> {
-        let data_close = data_select_column1(df, "Close")?;
-        let indicate = self
-            .clone()
-            .grpc(conf.indicator[0], conf.symbol.clone(), data_close)
-            .await;
-
-        //TODO add dates
-        //let indicator_selected = vec![proto::IndicatorType::BollingerBands];
-        let desc = desision_maker(indicate, conf.indicator.clone());
-        let ae = action_evaluator(conf.symbol.clone(), desc);
-        match ae.action {
-            Action::Buy => stock_buy(ae).await,
-            Action::Sell => stock_sell(ae).await,
-            _ => todo!(),
-        }
-    } */
     async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
         let mut c = self.client.clone().unwrap();
         let request = tonic::Request::new(req);

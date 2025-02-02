@@ -24,6 +24,12 @@ pub struct ActionValidate {
     pub validate: HashMap<String, ActionEval>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ActionConfig {
+    pub action_validate: Option<ActionValidate>,
+    pub indi_validate: Option<IndiValidate>,
+}
+
 #[derive(Clone)]
 pub struct TraderConf {
     pub symbol: String,

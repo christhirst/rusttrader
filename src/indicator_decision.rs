@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn action_evaluator_test() -> Result<(), Box<dyn std::error::Error>> {
-        let mut gg = vec![Action::Buy, Action::Buy, Action::Buy, Action::Sell];
+        let gg = vec![Action::Buy, Action::Buy, Action::Buy, Action::Sell];
         let sym = String::from("ORCL");
         let i = ActionValidate {
             validate: HashMap::from([
