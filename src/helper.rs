@@ -44,6 +44,10 @@ pub fn desision_maker(indicator_values: Indi, indicator_eval: IndiValidate) -> V
     action
 }
 
+fn amount(strength: f64, funds: f64, price: f64) -> i64 {
+    (strength * 10.0) as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

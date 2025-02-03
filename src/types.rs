@@ -50,3 +50,10 @@ pub struct ActionValuator {
     pub strength: f64,
     pub action: Action,
 }
+
+#[derive(Clone, Debug)]
+pub struct TradeConfig {
+    pub symbol: String,
+    pub strength: f64,
+    pub action: Action,
+}

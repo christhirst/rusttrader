@@ -15,7 +15,7 @@ pub trait StockActions {
 
 impl StockActions for TraderConfigs {
     async fn stock_buy(&self, av: ActionValuator) -> Result<(), CLIError> {
-        /* let amount = (av.strength * 10.0) as i64;
+        let amount = (av.strength * 10.0) as i64;
         let api_info = ApiInfo::from_env().unwrap();
         let client = Client::new(api_info);
         let request = order::CreateReqInit {
@@ -26,7 +26,7 @@ impl StockActions for TraderConfigs {
         .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
 
         let order = client.issue::<order::Create>(&request).await?;
-        println!("order: {:#?}", order); */
+        println!("order: {:#?}", order);
         Ok(())
     }
 

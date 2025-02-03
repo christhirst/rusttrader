@@ -4,7 +4,7 @@ use mockall::automock;
 use polars::{frame::DataFrame, io::SerReader, prelude::CsvReadOptions};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::error;
+use tracing::{error, info};
 
 use std::{
     collections::HashMap,
@@ -84,21 +84,25 @@ impl Calc for TraderConfigs {
         conf: &TraderConf,
         df: DataFrame,
         req: ListNumbersRequest2,
-
         col: &str,
     ) -> Result<(), CLIError> {
         let indicate = self.clone().grpc(req, conf.symbol.clone()).await;
 
         //TODO add dates
 
-        let desc = desision_maker(
-            indicate,
-            self.stock_indicators
-                .clone()
-                .unwrap()
-                .indi_validate
-                .unwrap(),
-        );
+        let d = match self.stock_indicators.clone() {
+            Some(x) => x,
+            None => {
+                let mut self_clone = Arc::clone(&self);
+                Arc::get_mut(&mut self_clone)
+                    .unwrap()
+                    .pull_stock_data()
+                    .await?
+            }
+        };
+        let u = d.indi_validate.unwrap();
+
+        let desc = desision_maker(indicate, u);
         //TODO
 
         let ae = action_evaluator(
@@ -114,6 +118,10 @@ impl Calc for TraderConfigs {
         match ae.action {
             Action::Buy => self.stock_buy(ae).await,
             Action::Sell => self.stock_sell(ae).await,
+            Action::Hold => {
+                info!("Hold");
+                Ok(())
+            }
             _ => {
                 error!("Invalid Action");
                 Err(CLIError::Converting)
@@ -161,6 +169,7 @@ impl TraderConfigs {
         let _port = conf.grpcport;
         //setup multiple trader
         //benchmark them against each other
+
         if let Some(client) = client {
             Ok(TraderConfigs {
                 conf_map: create_trader,
@@ -180,10 +189,10 @@ impl TraderConfigs {
     }
 
     #[allow(dead_code)]
-    async fn pull_stock_data(mut self) -> Result<ActionConfig, CLIError> {
+    async fn pull_stock_data(&mut self) -> Result<ActionConfig, CLIError> {
         //TODO pull data from database
 
-        Ok(ActionConfig {
+        let ii = ActionConfig {
             action_validate: Some(ActionValidate {
                 validate: HashMap::from([
                     (String::from("ORCL"), ActionEval::Buy(0.1)),
@@ -191,14 +200,16 @@ impl TraderConfigs {
                     (String::from("ORCL"), ActionEval::Hold(0.3)),
                 ]),
             }),
-
             indi_validate: Some(IndiValidate {
                 validate: HashMap::from([(
                     String::from("ORCL"),
                     HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
                 )]),
             }),
-        })
+        };
+        self.stock_indicators = Some(ii.clone());
+
+        Ok(ii)
     }
 
     //TODO CancellationToken
@@ -354,7 +365,8 @@ mod tests {
         let indicator = proto::IndicatorType::BollingerBands;
         let sym = String::from("ORCL");
 
-        let tr = TraderConfigs::new("Config.toml", Some(client), &sym).await?;
+        let mut tr = TraderConfigs::new("Config.toml", Some(client), &sym).await?;
+        tr.pull_stock_data().await;
         let arc_tr = Arc::new(tr);
         let tr_conf = TraderConf {
             symbol: sym.clone(),
