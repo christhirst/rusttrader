@@ -7,6 +7,7 @@ pub struct Indi {
     pub indicator: HashMap<proto::IndicatorType, f64>,
 }
 
+//hashmap of symbol and all indicators with strength
 #[derive(Clone, Debug)]
 pub struct IndiValidate {
     pub validate: HashMap<String, HashMap<proto::IndicatorType, f64>>,

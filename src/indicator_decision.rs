@@ -27,14 +27,14 @@ pub fn action_evaluator(symbol: String, eval: ActionValidate, av: Vec<Action>) -
     if (buy_count / sell_count) > strength {
         ActionValuator {
             symbol,
-            strength: 0.1,
+            strength: (buy_count / sell_count) as f64,
             action: Action::Buy,
         }
     } else if (sell_count / buy_count) > strength {
         ActionValuator {
             symbol,
-            strength: 0.2,
-            action: Action::Buy,
+            strength: (sell_count / buy_count) as f64,
+            action: Action::Sell,
         }
     } else {
         ActionValuator {
@@ -63,7 +63,7 @@ mod tests {
             ]),
         };
         let action = action_evaluator(sym, i, gg);
-        assert_eq!(action.strength, 0.1);
+        assert_eq!(action.strength, 3.0);
         Ok(())
     }
 }

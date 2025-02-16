@@ -1,4 +1,6 @@
 use error::CLIError;
+use std::sync::Arc;
+use std::sync::Mutex;
 use trader::TraderConfigs;
 
 mod alpaca_to_polars;
@@ -27,11 +29,14 @@ async fn main() -> Result<(), CLIError> {
 
     // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber).unwrap();
-
-    let client = IndicatorClient::connect(String::from("http://localhost:50051")).await?;
-
+    tracing::info!("Hello, world!");
+    let client = IndicatorClient::connect("http://[::1]:50051").await?;
+    tracing::info!("Hello, world!");
     let tr = TraderConfigs::new("Config.toml", Some(client), "ORCL").await?;
-    let handles = tr.trader_spawn().await;
+    let tr_config = Arc::new(Mutex::new(tr.clone()));
+
+    //spawn trader
+    let handles = tr.trader_spawn(tr_config).await;
 
     for i in handles {
         i.await.unwrap();

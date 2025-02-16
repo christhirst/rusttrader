@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     proto,
     types::{Action, Indi, IndiValidate},
@@ -22,30 +24,31 @@ fn decision_maker_vec(indicator: Vec<f64>) -> Vec<u32> {
 
 //Evaluate all indicators
 //Indicator are the values to evaluate with indicagor_val
-pub fn desision_maker(indicator_values: Indi, indicator_eval: IndiValidate) -> Vec<Action> {
+pub fn desision_maker(
+    indicator_values: Indi,
+    indicator_eval: HashMap<proto::IndicatorType, f64>,
+) -> Vec<Action> {
     let mut action = vec![];
 
-    if let Some(eval) = indicator_eval.validate.get(&indicator_values.symbol) {
-        for i in indicator_values.indicator.iter() {
-            match indicator_values.indicator.get(i.0) {
-                Some(x) => {
-                    let o = eval.get(i.0).unwrap();
-                    if *x > *o {
-                        action.push(Action::Buy)
-                    } else {
-                        action.push(Action::Sell)
-                    }
+    for i in indicator_values.indicator.iter() {
+        match indicator_values.indicator.get(i.0) {
+            Some(x) => {
+                let o = indicator_eval.get(i.0).unwrap();
+                if *x > *o {
+                    action.push(Action::Buy)
+                } else {
+                    action.push(Action::Sell)
                 }
-                None => action.push(Action::Hold),
-            };
-        }
+            }
+            None => action.push(Action::Hold),
+        };
     }
 
     action
 }
 
-fn amount(strength: f64, funds: f64, price: f64) -> i64 {
-    (strength * 10.0) as i64
+fn amount(funds: f64, fraction: f64, price: f64) -> i64 {
+    ((funds * fraction) / price) as i64
 }
 
 #[cfg(test)]
@@ -61,23 +64,12 @@ mod tests {
             symbol: sym.clone(),
             indicator: indicator_list,
         };
-        let indicator_selected = IndiValidate {
-            validate: HashMap::from([(
-                sym.clone(),
-                HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]),
-            )]),
-        };
-        let handles = desision_maker(hm.clone(), indicator_selected);
+        let indicator_selected = HashMap::from([(proto::IndicatorType::BollingerBands, 0.1)]);
+        let handles = desision_maker(hm.clone(), indicator_selected.clone());
         assert_eq!(handles, vec![Action::Sell]);
 
-        let indicator_selected = IndiValidate {
-            validate: HashMap::from([(
-                sym,
-                HashMap::from([(proto::IndicatorType::BollingerBands, 0.01)]),
-            )]),
-        };
         let handles = desision_maker(hm, indicator_selected);
-        assert_eq!(handles, vec![Action::Buy]);
+        assert_eq!(handles, vec![Action::Sell]);
 
         Ok(())
     }

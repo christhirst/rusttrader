@@ -1,7 +1,7 @@
 //#[feature(arbitrary_self_types)]
 
 use mockall::automock;
-use polars::{frame::DataFrame, io::SerReader, prelude::CsvReadOptions};
+use polars::{io::SerReader, prelude::CsvReadOptions};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info};
@@ -9,7 +9,7 @@ use tracing::{error, info};
 use std::{
     collections::HashMap,
     fmt::{self},
-    sync::Arc,
+    sync::{Arc, Mutex},
     vec,
 };
 use tokio::task::JoinHandle;
@@ -22,14 +22,15 @@ use crate::{
     helper::desision_maker,
     indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, ListNumbersRequest2},
-    trade::StockActions,
-    types::{Action, ActionConfig, ActionEval, ActionValidate, Indi, IndiValidate, TraderConf},
+    types::{
+        ActionConfig, ActionEval, ActionValidate, ActionValuator, Indi, IndiValidate, TraderConf,
+    },
 };
 
 #[automock]
 trait Calc {
     async fn grpc(
-        self: Arc<Self>,
+        &self,
         req: ListNumbersRequest2,
         //ii: IndicatorClient<Channel>,
         symbol: String,
@@ -38,15 +39,21 @@ trait Calc {
     async fn decision_point(
         self: Arc<Self>,
         conf: &TraderConf,
-        df: DataFrame,
         req: ListNumbersRequest2,
         col: &str,
-    ) -> Result<(), CLIError>;
+    ) -> Result<ActionValuator, CLIError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct TraderConfigs {
+    conf_map: HashMap<String, TraderConf>,
+    client: Option<IndicatorClient<Channel>>,
+    stock_indicators: Option<ActionConfig>,
 }
 
 impl Calc for TraderConfigs {
     async fn grpc(
-        self: Arc<Self>,
+        &self,
         req: ListNumbersRequest2,
         //ii: IndicatorClient<Channel>,
         symbol: String,
@@ -60,7 +67,7 @@ impl Calc for TraderConfigs {
             println!("now running on a worker thread");
 
             let test = c.gen_liste(req).await.unwrap();
-            println!("test: {:#?}", test);
+            //println!("test: {:#?}", test);
         });
         treads.push(handle);
 
@@ -82,15 +89,20 @@ impl Calc for TraderConfigs {
     async fn decision_point(
         self: Arc<Self>,
         conf: &TraderConf,
-        df: DataFrame,
         req: ListNumbersRequest2,
         col: &str,
-    ) -> Result<(), CLIError> {
-        let indicate = self.clone().grpc(req, conf.symbol.clone()).await;
+    ) -> Result<ActionValuator, CLIError> {
+        //get indicator data
+        let indicator_from_stock_data = self.clone().grpc(req, conf.symbol.clone()).await;
+        //let indicator_from_stock_data = self.clone().grpc(req, conf.symbol.clone()).await;
+        println!("decision_point");
+        let validators = self.clone().stock_indicators.clone();
+        println!("self: {:#?}", self);
+        let validators = validators.clone().unwrap();
+        let validators = validators.indi_validate.unwrap().validate;
 
-        //TODO add dates
-
-        let d = match self.stock_indicators.clone() {
+        //get stock actions
+        /* let stock_actions = match self.stock_indicators.clone() {
             Some(x) => x,
             None => {
                 let mut self_clone = Arc::clone(&self);
@@ -99,13 +111,17 @@ impl Calc for TraderConfigs {
                     .pull_stock_data()
                     .await?
             }
-        };
-        let u = d.indi_validate.unwrap();
+        }; */
 
-        let desc = desision_maker(indicate, u);
-        //TODO
+        //getting indicator data
+        //let validators = stock_actions.indi_validate.unwrap().validate;
 
-        let ae = action_evaluator(
+        let desc = desision_maker(
+            indicator_from_stock_data,
+            validators.get(&conf.symbol).unwrap().clone(),
+        );
+
+        Ok(action_evaluator(
             conf.symbol.clone(),
             self.stock_indicators
                 .clone()
@@ -113,29 +129,22 @@ impl Calc for TraderConfigs {
                 .action_validate
                 .unwrap(),
             desc,
-        );
-
-        match ae.action {
-            Action::Buy => self.stock_buy(ae).await,
-            Action::Sell => self.stock_sell(ae).await,
-            Action::Hold => {
-                info!("Hold");
-                Ok(())
-            }
-            _ => {
-                error!("Invalid Action");
-                Err(CLIError::Converting)
-            }
-        }
+        ))
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TraderConfigs {
-    conf_map: HashMap<String, TraderConf>,
-    client: Option<IndicatorClient<Channel>>,
-    stock_indicators: Option<ActionConfig>,
-}
+/* match ae.action {
+    Action::Buy => self.stock_buy(ae).await,
+    Action::Sell => self.stock_sell(ae).await,
+    Action::Hold => {
+        info!("Hold");
+        Ok(())
+    }
+    _ => {
+        error!("Invalid Action");
+        Err(CLIError::Converting)
+    }
+} */
 
 impl fmt::Debug for TraderConf {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -167,14 +176,31 @@ impl TraderConfigs {
         };
         create_trader.insert(sym.to_string(), tc);
         let _port = conf.grpcport;
+        tracing::info!("Port: {}", _port);
         //setup multiple trader
         //benchmark them against each other
+
+        let ac = ActionConfig {
+            action_validate: Some(ActionValidate {
+                validate: HashMap::from([
+                    (String::from("ORCL"), ActionEval::Buy(0.0)),
+                    (String::from("ORCL"), ActionEval::Sell(0.0)),
+                    (String::from("ORCL"), ActionEval::Hold(0.0)),
+                ]),
+            }),
+            indi_validate: Some(IndiValidate {
+                validate: HashMap::from([(
+                    String::from("ORCL"),
+                    HashMap::from([(proto::IndicatorType::BollingerBands, 0.0)]),
+                )]),
+            }),
+        };
 
         if let Some(client) = client {
             Ok(TraderConfigs {
                 conf_map: create_trader,
                 client: Some(client),
-                stock_indicators: None,
+                stock_indicators: Some(ac),
             })
         } else {
             Err(CLIError::Converting)
@@ -213,54 +239,45 @@ impl TraderConfigs {
     }
 
     //TODO CancellationToken
-    pub async fn trader_spawn(self) -> Vec<JoinHandle<()>> {
-        //token for shutdown
-        let shotdown_token = CancellationToken::new();
-
+    pub async fn trader_spawn(self, trader_conf: Arc<Mutex<TraderConfigs>>) -> Vec<JoinHandle<()>> {
+        // Token for shutdown
+        let shutdown_token = CancellationToken::new();
         let conf = Arc::new(self);
-        let mut treads: Vec<JoinHandle<()>> = vec![];
-        for (_symbol, trader_conf) in conf.conf_map.clone() {
-            //token for shutdown cloned
-            let cloned_shotdown_token = shotdown_token.clone();
+        let mut threads: Vec<JoinHandle<()>> = vec![];
 
+        let conf_map = {
+            let self_lock = trader_conf.lock().unwrap();
+            self_lock.conf_map.clone()
+        };
+
+        //spawn trader for every symbol
+        for (_symbol, trader_conf) in conf_map {
+            // Token for shutdown cloned
+            let cloned_shutdown_token = shutdown_token.clone();
             let self_clone = Arc::clone(&conf);
-            // No need to clone if not using Arc
-            //let client = (&self.trader).clone(); // Use `clone()` if `IndicatorClient` implements Clone
+
             let t = tokio::spawn(async move {
                 tokio::select! {
                     // Step 3: Using cloned token to listen to cancellation requests
-                    _ = cloned_shotdown_token.cancelled() => {
+                    _ = cloned_shutdown_token.cancelled() => {
                         // The token was cancelled, task can shut down
-                    }
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
-
-                self_clone.trader(&trader_conf, "Close").await;
-                        // Long work has completed
+                        let _res = self_clone.trader(&trader_conf, "Close").await;
                     }
                 }
-
-                /* let ten_millis = time::Duration::from_millis(100);
-
-                thread::sleep(ten_millis);
-                self_clone.trader(&trader_conf).await; */
             });
-            treads.push(t);
+            threads.push(t);
         }
-        //Cancel the original or cloned token to notify other tasks about shutting down gracefully
-        shotdown_token.cancel();
-        treads
+        // Cancel the original or cloned token to notify other tasks about shutting down gracefully
+        shutdown_token.cancel();
+        threads
     }
 
-    /* async fn data_append(
+    /* async fn reload_conf(
         self: Arc<Self>,
         data: DataFrame,
         av: (String, Vec<f64>),
     ) -> Result<Vec<f64>, CLIError> {
-        let df = data_append(data, av)?;
-        //df.with_column(column("Close").cast::<Float64>())
-        //Date,Open,High,Low,Close,Adj Close,Volume
-        let close: Vec<f64> = df["Close"].f64().unwrap().to_vec_null_aware().unwrap_left();
-        Ok(close)
+        todo!()
     } */
 
     async fn data_indicator_get(self: Arc<Self>, req: proto::ListNumbersRequest2) -> Vec<f64> {
@@ -269,9 +286,9 @@ impl TraderConfigs {
         c.gen_liste(request).await.unwrap().into_inner().result
     }
 
+    //trader for every symbol
     async fn trader(self: Arc<Self>, trader_conf: &TraderConf, col: &str) -> Result<(), CLIError> {
         let self_clone = Arc::clone(&self);
-
         //get data from csv or grpc
         let df = CsvReadOptions::default()
             .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
@@ -290,10 +307,15 @@ impl TraderConfigs {
         //check with indicator
         //evaluate action
         //execute action
-        let _ = self_clone
-            .clone()
-            .decision_point(trader_conf, df, req, "Close")
-            .await;
+
+        //ticker
+        let trader_conf = trader_conf.clone();
+        let t = tokio::spawn(async move {
+            let decision = self_clone
+                .clone()
+                .decision_point(&trader_conf, req, "Close")
+                .await;
+        });
 
         Ok(())
     }
@@ -303,6 +325,7 @@ impl TraderConfigs {
 mod tests {
     use super::*;
     use crate::trade::MockStockActions;
+    use crate::types::Action;
     use grpcmock::generate_server;
     use grpcmock::prelude::*;
     use grpcmock::server;
@@ -317,7 +340,7 @@ mod tests {
     #[tokio::test]
     async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
         //new TraderConfig
-        let tr = Arc::new(TraderConfigs::new("Config.toml", None, "ORCL").await?);
+        let tr = TraderConfigs::new("Config.toml", None, "ORCL").await?;
         //get symbol
         let conf_tr = tr.conf_map.get("ORCL");
         //check config exists
@@ -378,9 +401,9 @@ mod tests {
         let df = DataFrame::default();
         let s = Series::new(price_flag.into(), &[1.0, 2.0, 3.0]);
         let df = DataFrame::new(vec![s]).unwrap();
-        let arc_mock = arc_tr.decision_point(&tr_conf, df, req, price_flag).await;
+        let res = arc_tr.decision_point(&tr_conf, req, price_flag).await?;
 
-        assert!(arc_mock.is_ok());
+        assert_eq!(res.action, Action::Buy);
         Ok(())
     }
 

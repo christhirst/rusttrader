@@ -11,8 +11,9 @@ use crate::{error::CLIError, trader::TraderConfigs, types::ActionValuator};
 pub trait StockActions {
     async fn stock_buy(&self, av: ActionValuator) -> Result<(), CLIError>;
     async fn stock_sell(&self, av: ActionValuator) -> Result<(), CLIError>;
+    async fn liquidate_all(&self, av: ActionValuator) -> Result<(), CLIError>;
 }
-
+//check order filled, then trailing stop, atr indi
 impl StockActions for TraderConfigs {
     async fn stock_buy(&self, av: ActionValuator) -> Result<(), CLIError> {
         let amount = (av.strength * 10.0) as i64;
@@ -45,37 +46,9 @@ impl StockActions for TraderConfigs {
         println!("order: {:#?}", order);
         Ok(())
     }
-}
-
-pub async fn stock_buy(av: ActionValuator) -> Result<(), CLIError> {
-    /* let amount = (av.strength * 10.0) as i64;
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-    let request = order::CreateReqInit {
-        type_: Type::Limit,
-        limit_price: Some(Num::from(100)),
-        ..Default::default()
+    async fn liquidate_all(&self, av: ActionValuator) -> Result<(), CLIError> {
+        todo!()
     }
-    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
-
-    let order = client.issue::<order::Create>(&request).await?;
-    println!("order: {:#?}", order); */
-    Ok(())
-}
-pub async fn stock_sell(av: ActionValuator) -> Result<(), CLIError> {
-    let amount = (av.strength * 10.0) as i64;
-    let api_info = ApiInfo::from_env().unwrap();
-    let client = Client::new(api_info);
-    let request = order::CreateReqInit {
-        type_: Type::Limit,
-        limit_price: Some(Num::from(100)),
-        ..Default::default()
-    }
-    .init(av.symbol, Side::Buy, order::Amount::quantity(amount));
-
-    let order = client.issue::<order::Create>(&request).await?;
-    println!("order: {:#?}", order);
-    Ok(())
 }
 
 /* async fn data_get(date: &str) -> Result<apca::data::v2::bars::Bars, CLIError> {
