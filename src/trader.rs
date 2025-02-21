@@ -1,5 +1,6 @@
 //#[feature(arbitrary_self_types)]
 
+use chrono::Duration;
 use mockall::automock;
 use polars::{io::SerReader, prelude::CsvReadOptions};
 use tokio_util::sync::CancellationToken;
@@ -12,7 +13,7 @@ use std::{
     sync::{Arc, Mutex},
     vec,
 };
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::sleep};
 use tonic::transport::Channel;
 
 use crate::{
@@ -311,11 +312,16 @@ impl TraderConfigs {
         //ticker
         let trader_conf = trader_conf.clone();
         let t = tokio::spawn(async move {
-            let decision = self_clone
-                .clone()
-                .decision_point(&trader_conf, req, "Close")
-                .await;
+            loop {
+                sleep(std::time::Duration::from_millis(1000)).await;
+                let decision = self_clone
+                    .clone()
+                    .decision_point(&trader_conf, req.clone(), "Close")
+                    .await;
+            }
         });
+
+        t.await.unwrap();
 
         Ok(())
     }

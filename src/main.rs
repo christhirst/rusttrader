@@ -10,6 +10,7 @@ mod dataframe;
 mod error;
 mod helper;
 mod indicator_decision;
+mod runner;
 mod test_helper;
 mod trade;
 mod trader;
