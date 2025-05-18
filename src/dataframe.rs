@@ -33,7 +33,7 @@ fn data(res: apca::data::v2::bars::Bars, span: DynamicGroupOptions) -> Result<Da
             .with_row_index("index".into(), None)
             .unwrap();
     let joined =
-        s.v.join(&n, ["index"], ["index"], JoinType::Left.into())
+        s.v.join(&n, ["index"], ["index"], JoinType::Left.into(), None)
             .unwrap();
     let oo = joined
         .clone()

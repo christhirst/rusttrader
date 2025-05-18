@@ -4,6 +4,8 @@
 //TODO
 //TODO
 
+use crate::trader::TraderConfigs;
+
 #[derive(Clone, Debug)]
 pub enum Data_Source {
     Grpc,
@@ -16,7 +18,7 @@ pub struct live_data {
     pub data_source: Data_Source,
 }
 
-async fn loop_data(
+/* async fn loop_data(
     ds: Data_Source,
     tc: TraderConfigs,
     conf: &TraderConf,
@@ -34,9 +36,9 @@ async fn loop_data(
     }
     //todo grpc listener
     //grpc or:
-}
+} */
 
-async fn grpc_listen_or_loop(ds: Data_Source) {
+/* async fn grpc_listen_or_loop(ds: Data_Source) {
     match ds {
         Data_Source::Grpc => {
             sleep(std::time::Duration::from_millis(1000)).await;
@@ -44,7 +46,7 @@ async fn grpc_listen_or_loop(ds: Data_Source) {
         Data_Source::Get => {}
         Data_Source::Csv => loop_data(todo!(), todo!(), todo!(), todo!(), todo!()).await,
     }
-}
+} */
 
 #[cfg(test)]
 mod tests {
@@ -55,7 +57,7 @@ mod tests {
     #[tokio::test]
     async fn stock_buy_test() -> Result<(), Box<dyn std::error::Error>> {
         use mockall::predicate;
-        let mut mock = MockStockActions::new();
+        //let mut mock = MockStockActions::new();
 
         Ok(())
     }

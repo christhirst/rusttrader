@@ -66,6 +66,7 @@ impl StockActions for TraderConfigs {
 } */
 
 #[cfg(test)]
+
 mod tests {
     use crate::types::Action;
 

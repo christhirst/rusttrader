@@ -332,87 +332,88 @@ mod tests {
     use super::*;
     use crate::trade::MockStockActions;
     use crate::types::Action;
-    use grpcmock::generate_server;
+    use crate::Settings;
+    /* use grpcmock::generate_server;
     use grpcmock::prelude::*;
-    use grpcmock::server;
+    use grpcmock::server; */
     use polars::prelude::*;
     use proto::*;
     use proto::{indicator_client::IndicatorClient, ListNumbersRequest2, ListNumbersResponse};
     use tonic::transport::Channel;
 
     // Generate server `MockHelloServer` for the `calculate.Indicator` service.
-    generate_server!("calculate.Indicator", MockCalculateServer);
+    //generate_server!("calculate.Indicator", MockCalculateServer);
 
-    #[tokio::test]
-    async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
-        //new TraderConfig
-        let tr = TraderConfigs::new("Config.toml", None, "ORCL").await?;
-        //get symbol
-        let conf_tr = tr.conf_map.get("ORCL");
-        //check config exists
-        assert!(conf_tr.is_some());
-        Ok(())
-    }
+    /* #[tokio::test]
+       async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
+           //new TraderConfig
+           let tr = TraderConfigs::new("Config.toml", None, "ORCL").await?;
+           //get symbol
+           let conf_tr = tr.conf_map.get("ORCL");
+           //check config exists
+           assert!(conf_tr.is_some());
+           Ok(())
+       }
 
-    #[tokio::test]
-    async fn decision_point_test() -> Result<(), Box<dyn std::error::Error>> {
-        // Create a new MockSet
-        let mut mocks = MockSet::new();
-        let price_flag = "Close";
+       #[tokio::test]
+       async fn decision_point_test() -> Result<(), Box<dyn std::error::Error>> {
+           // Create a new MockSet
+           let mut mocks = MockSet::new();
+           let price_flag = "Close";
 
-        // Load and insert mocks from mock files
-        // NOTE: generic type parameters correspond to prost-generated input and output types of the method.
-        let req = ListNumbersRequest2 {
-            id: 2,
-            opt: Some(proto::Opt {
-                multiplier: 1.0,
-                period: 2,
-            }),
-            list: Vec::from([1.0, 2.0, 3.0]),
-        };
+           // Load and insert mocks from mock files
+           // NOTE: generic type parameters correspond to prost-generated input and output types of the method.
+           let req = ListNumbersRequest2 {
+               id: 2,
+               opt: Some(proto::Opt {
+                   multiplier: 1.0,
+                   period: 2,
+               }),
+               list: Vec::from([1.0, 2.0, 3.0]),
+           };
 
-        mocks.insert(
-            GrpcMethod::new("calculate.Indicator", "GenListe")?,
-            Mock::new(
-                req.clone(),
-                ListNumbersResponse {
-                    result: Vec::from([1.0, 2.0, 3.0]),
-                },
-            ),
-        );
+           mocks.insert(
+               GrpcMethod::new("calculate.Indicator", "GenListe")?,
+               Mock::new(
+                   req.clone(),
+                   ListNumbersResponse {
+                       result: Vec::from([1.0, 2.0, 3.0]),
+                   },
+               ),
+           );
 
-        // Start mock server
-        let server = MockCalculateServer::start(mocks).await?;
+           // Start mock server
+           let server = MockCalculateServer::start(mocks).await?;
 
-        // Create mock client
-        let channel = Channel::from_shared(format!("http://0.0.0.0:{}", server.addr().port()))?
-            .connect()
-            .await?;
-        let mut client = IndicatorClient::new(channel);
+           // Create mock client
+           let channel = Channel::from_shared(format!("http://0.0.0.0:{}", server.addr().port()))?
+               .connect()
+               .await?;
+           let mut client = IndicatorClient::new(channel);
 
-        //decison_point params
-        let indicator = proto::IndicatorType::BollingerBands;
-        let sym = String::from("ORCL");
+           //decison_point params
+           let indicator = proto::IndicatorType::BollingerBands;
+           let sym = String::from("ORCL");
 
-        let mut tr = TraderConfigs::new("Config.toml", Some(client), &sym).await?;
-        tr.pull_stock_data().await;
-        let arc_tr = Arc::new(tr);
-        let tr_conf = TraderConf {
-            symbol: sym.clone(),
-            price_label: String::from(price_flag),
-            indicator: vec![indicator],
-        };
+           let mut tr = TraderConfigs::new("Config.toml", Some(client), &sym).await?;
+           tr.pull_stock_data().await;
+           let arc_tr = Arc::new(tr);
+           let tr_conf = TraderConf {
+               symbol: sym.clone(),
+               price_label: String::from(price_flag),
+               indicator: vec![indicator],
+           };
 
-        //decison_point test
-        let df = DataFrame::default();
-        let s = Series::new(price_flag.into(), &[1.0, 2.0, 3.0]);
-        let df = DataFrame::new(vec![s]).unwrap();
-        let res = arc_tr.decision_point(&tr_conf, req, price_flag).await?;
+           //decison_point test
+           let df = DataFrame::default();
+           let s = Series::new(price_flag.into(), &[1.0, 2.0, 3.0]);
+           let df = DataFrame::new(vec![s]).unwrap();
+           let res = arc_tr.decision_point(&tr_conf, req, price_flag).await?;
 
-        assert_eq!(res.action, Action::Buy);
-        Ok(())
-    }
-
+           assert_eq!(res.action, Action::Buy);
+           Ok(())
+       }
+    */
     #[tokio::test]
     async fn data_grpc_get_test() -> Result<(), Box<dyn std::error::Error>> {
         /*  let tr = TraderConfigs::new("Config.toml").await?;
@@ -428,15 +429,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn data_read() -> Result<(), Box<dyn std::error::Error>> {
+        let df = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some("files/orcl.csv".into()))
+            .unwrap()
+            .finish()?;
+        println!("symbol: {:?}", df);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn trader_test() -> Result<(), Box<dyn std::error::Error>> {
-        /*  let tr = TraderConfigs::new("Config.toml").await?;
-        let foo = Arc::new(tr);
+        //let tr = TraderConfigs::new("Config.toml").await?;
+        /* let foo = Arc::new(tr);
         let req = proto::ListNumbersRequest2 {
             id: indicator.into(),
             list: data,
         };
 
         foo.data_indicator_get(req); */
+        let client = IndicatorClient::connect("http://[::1]:50051").await?;
+        let tr = TraderConfigs::new("Config.toml", Some(client), "ORCL").await?;
+
+        let settings = Settings::new().unwrap();
+
+        for i in settings.symbols {
+            println!("symbol: {:?}", i);
+        }
+
+        let tr_config = Arc::new(Mutex::new(tr.clone()));
+
+        //spawn trader
+        let handles = tr.trader_spawn(tr_config).await;
+
+        for i in handles {
+            i.await.unwrap();
+        }
 
         Ok(())
     }

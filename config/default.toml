@@ -1,0 +1,8 @@
+[database]
+url = "postgres://postgres@localhost"
+
+[[symbols]]
+action = "Long"
+name = "ORACLE"
+symbol = "ORCL"
+indicator = ["BOLLINGER", "RSI"]
