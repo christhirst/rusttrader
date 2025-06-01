@@ -1,3 +1,5 @@
+//no warnings
+#![allow(warnings)]
 use apca::data::v2::stream::Data;
 use error::CLIError;
 use std::sync::Arc;
@@ -7,6 +9,7 @@ use trader::TraderConfigs;
 mod alpaca_to_polars;
 mod client;
 mod config;
+mod config2;
 mod data;
 mod dataframe;
 mod error;
@@ -25,8 +28,9 @@ pub mod proto {
     tonic::include_proto!("plots");
 }
 
-mod settings;
-use settings::Settings;
+mod settings_delete;
+//use settings::Settings;
+use config2::Settings;
 
 use apca::data::v2::stream::drive;
 use apca::data::v2::stream::Bar;
@@ -125,10 +129,10 @@ async fn main() -> Result<(), CLIError> {
         .await
         .unwrap();
 
-    let settings = Settings::new();
+    //let settings = Settings::new();
 
     // Print out our settings
-    println!("{settings:?}");
+    //println!("{settings:?}");
 
     // construct a subscriber that prints formatted traces to stdout
     let subscriber = tracing_subscriber::fmt().compact().finish();
@@ -136,9 +140,12 @@ async fn main() -> Result<(), CLIError> {
     // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber).unwrap();
     tracing::info!("Hello, world!");
+
+    let settings = Settings::new().unwrap();
+
     let client = IndicatorClient::connect("http://[::1]:50051").await?;
     tracing::info!("Hello, world!");
-    let tr = TraderConfigs::new("Config.toml", Some(client), "ORCL").await?;
+    let tr = TraderConfigs::new(settings, "Config.toml", Some(client), "ORCL").await?;
     let tr_config = Arc::new(Mutex::new(tr.clone()));
 
     //spawn trader

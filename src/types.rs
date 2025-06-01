@@ -1,5 +1,10 @@
-use crate::proto::{self};
-use std::collections::HashMap;
+use apca::data::v2::stream::Bar;
+
+use crate::{
+    config2::IndicatorType,
+    proto::{self},
+};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug)]
 pub struct Indi {
@@ -11,6 +16,12 @@ pub struct Indi {
 #[derive(Clone, Debug)]
 pub struct IndiValidate {
     pub validate: HashMap<String, HashMap<proto::IndicatorType, f64>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Buffer {
+    pub capacity: usize,
+    pub data: VecDeque<Bar>,
 }
 
 #[derive(Clone, Debug)]
@@ -35,7 +46,8 @@ pub struct ActionConfig {
 pub struct TraderConf {
     pub symbol: String,
     pub price_label: String,
-    pub indicator: Vec<proto::IndicatorType>,
+    pub indicator: Vec<IndicatorType>,
+    pub buff: Buffer,
 }
 
 #[derive(Clone, PartialEq, Debug)]

@@ -18,22 +18,48 @@ enum Indicator {
     Bol,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum IndicatorType {
+    BollingerBands = 0,
+    ExponentialMovingAverage = 1,
+    MaxDrawdown = 2,
+    MaxDrawup = 3,
+    Maximum = 4,
+    MeanAbsoluteDeviation = 5,
+    Minimum = 6,
+    RateOfChange = 7,
+    RelativeStrengthIndex = 8,
+    SimpleMovingAverage = 9,
+    StandardDeviation = 10,
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(unused)]
 pub struct Stockconfig {
     pub name: String,
     pub symbol: String,
-    pub indicator: Vec<String>,
+    pub indicator: Vec<IndicatorType>,
     pub action: Action,
+    pub buffersize: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(unused)]
+pub struct AppConfig {
+    pub grpcport: String,
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(unused)]
 pub(crate) struct Settings {
-    pub symbols: Vec<Stockconfig>,
+    pub grpc: AppConfig,
+    pub Stockconfig: Vec<Stockconfig>,
 }
 
-impl Settings {
+/* impl Settings {
     pub(crate) fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
 
@@ -55,10 +81,9 @@ impl Settings {
             .build()?;
 
         // Now that we're done, let's access our configuration
-        println!("debug: {:?}", s.get_bool("debug"));
-        println!("database: {:?}", s.get::<String>("database.url"));
 
         // You can deserialize (and thus freeze) the entire configuration as
         s.try_deserialize()
     }
 }
+ */

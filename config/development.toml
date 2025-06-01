@@ -1,4 +1,34 @@
-debug = true
 
-[database]
-echo = true
+[grpc]
+grpcport = "http://[::1]:50051"
+username = "testuser"
+password = "testPW"
+baseurl = "http://localhost:8000"
+
+
+#[debug]
+#echo = true
+# --- conf_map ---
+# Each key here (e.g., "trader1") maps to a TraderConf configuration.
+[Stockconfig.ORCL]
+symbol = "ORCL"
+price_label = "Close"
+indicator = [
+    { type = "BollingerBands" },
+    { type = "ExponentialMovingAverage" },
+    { type = "RelativeStrengthIndex" },
+]
+buffersize = 5
+
+
+# Optional ActionValidate configuration.
+#[conf_map.action_validate]
+# Example fields – adapt these to your ActionValidate struct.
+#threshold = 10
+#mode = "strict"
+
+# Optional IndiValidate configuration.
+#[conf_map.indi_validate]
+# Example fields – adapt these to your IndiValidate struct.
+#enabled = true
+#tolerance = 0.05

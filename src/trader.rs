@@ -1,15 +1,23 @@
 //#[feature(arbitrary_self_types)]
 
-use chrono::Duration;
+use apca::data::v2::stream::Bar;
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use mockall::automock;
-use polars::{io::SerReader, prelude::CsvReadOptions};
+use num_decimal::Num;
+use polars::{
+    frame::DataFrame,
+    io::SerReader,
+    prelude::{col, CsvReadOptions, IntoLazy, NamedFrom},
+    series::Series,
+};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info};
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::{self},
+    str::FromStr,
     sync::{Arc, Mutex},
     vec,
 };
@@ -18,13 +26,17 @@ use tonic::transport::Channel;
 
 use crate::{
     config::AppConfig,
+    config2::Settings,
+    data::data_csv,
     dataframe::data_select_column1,
     error::CLIError,
     helper::desision_maker,
     indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, ListNumbersRequest2},
+    trade::StockActions,
     types::{
-        ActionConfig, ActionEval, ActionValidate, ActionValuator, Indi, IndiValidate, TraderConf,
+        ActionConfig, ActionEval, ActionValidate, ActionValuator, Buffer, Indi, IndiValidate,
+        TraderConf,
     },
 };
 
@@ -43,16 +55,73 @@ trait Calc {
         req: ListNumbersRequest2,
         col: &str,
     ) -> Result<ActionValuator, CLIError>;
+
+    fn makes_adder(self: Arc<Self>, d: DateTime<Utc>, o: f64, c: f64, h: f64, l: f64) -> f64;
+}
+
+#[automock]
+trait PortfolioActions {
+    fn buy(&mut self, symbol: &str, share_amount: f64, share_price: f64) {}
+    fn sell(&mut self, symbol: &str, share_amount: f64, share_price: f64) {}
+}
+
+//TODO buy, sell, hold
+#[derive(Clone, Debug)]
+pub struct Portfolio {
+    pub name: String,
+    pub cash: Option<f64>,
+    pub stocks: Option<HashMap<String, f64>>, // symbol and amount of shares
+}
+
+impl PortfolioActions for Portfolio {
+    //TODO
+    fn buy(&mut self, symbol: &str, share_amount: f64, share_price: f64) {
+        if self.cash.is_none() || self.cash.unwrap() < share_amount * share_price {
+            error!("Not enough cash to buy shares");
+            return;
+        }
+
+        self.cash = Some(self.cash.unwrap() - share_amount * share_price);
+        self.stocks
+            .as_mut()
+            .unwrap()
+            .entry("ORCL".to_string())
+            .and_modify(|value| *value += share_amount);
+    }
+
+    fn sell(&mut self, symbol: &str, share_amount: f64, share_price: f64) {
+        println!("Selling {} shares of {}", share_amount, symbol);
+        if *self.stocks.clone().unwrap().get(symbol).unwrap() < share_amount {
+            error!("Not enough cash to buy shares");
+            return;
+        }
+        self.cash = Some(self.cash.unwrap() + share_amount * share_price);
+
+        self.stocks
+            .as_mut()
+            .unwrap()
+            .entry("ORCL".to_string())
+            .and_modify(|value| *value -= share_amount);
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct TraderConfigs {
     conf_map: HashMap<String, TraderConf>,
+    portfolio: Option<Portfolio>,
     client: Option<IndicatorClient<Channel>>,
     stock_indicators: Option<ActionConfig>,
 }
 
 impl Calc for TraderConfigs {
+    fn makes_adder(self: Arc<Self>, d: DateTime<Utc>, o: f64, c: f64, h: f64, l: f64) -> f64 {
+        println!("o:{o}");
+        println!("c:{c}");
+        println!("l:{l}");
+        println!("h:{h}");
+        2.0
+    }
+
     async fn grpc(
         &self,
         req: ListNumbersRequest2,
@@ -159,24 +228,29 @@ impl fmt::Debug for TraderConf {
 
 impl TraderConfigs {
     pub async fn new(
+        settings: Settings,
         path: &str,
         client: Option<IndicatorClient<Channel>>,
         sym: &str,
     ) -> Result<Self, CLIError> {
-        let default_conf = AppConfig::default();
-        let conf = default_conf.confload(path).unwrap();
-
+        /* let default_conf = AppConfig::default();
+               let conf = default_conf.confload(path).unwrap();
+        */
         let mut create_trader = HashMap::new();
-        let tc = TraderConf {
-            symbol: String::from(sym),
-            price_label: String::from("Close"),
-            indicator: vec![
-                (proto::IndicatorType::BollingerBands),
-                (proto::IndicatorType::SimpleMovingAverage),
-            ],
-        };
-        create_trader.insert(sym.to_string(), tc);
-        let _port = conf.grpcport;
+        for (i, c) in settings.Stockconfig.iter() {
+            let tc = TraderConf {
+                symbol: c.symbol.clone(),
+                price_label: String::from("Close"),
+                indicator: c.indicator.clone(),
+                buff: Buffer {
+                    capacity: c.buffersize,
+                    data: VecDeque::with_capacity(c.buffersize),
+                },
+            };
+            create_trader.insert(sym.to_string(), tc);
+        }
+
+        let _port = settings.grpc.grpcport.clone();
         tracing::info!("Port: {}", _port);
         //setup multiple trader
         //benchmark them against each other
@@ -197,15 +271,105 @@ impl TraderConfigs {
             }),
         };
 
-        if let Some(client) = client {
+        if let client = client {
             Ok(TraderConfigs {
                 conf_map: create_trader,
-                client: Some(client),
+                portfolio: Some(Portfolio {
+                    name: String::from("Default Portfolio"),
+                    cash: Some(1000.0),
+                    stocks: Some(HashMap::from([("ORCL".to_string(), 0.0)])), //TODO HashMap::from([("ORCL".to_string(), 0.0)]),
+                }),
+                client: None,
                 stock_indicators: Some(ac),
             })
         } else {
             Err(CLIError::Converting)
         }
+    }
+
+    //TODO holding shares
+    //series to graph
+    pub fn actionTest(&mut self, d: DateTime<Utc>, a: i32, c: f64) -> (f64, f64) {
+        let port_ref = self.portfolio.as_mut().unwrap();
+        let shares_to_buy = 20.0;
+        let mut cash = port_ref.cash.unwrap();
+        let mut shares_owned = port_ref
+            .stocks
+            .clone()
+            .unwrap()
+            .get("ORCL")
+            .unwrap()
+            .clone();
+        if a == 1 {
+            port_ref.buy("ORCL", shares_to_buy, c);
+            return (cash, shares_owned); // Buy
+        } else if a == -1 {
+            port_ref.sell("ORCL", shares_to_buy, c);
+            return (cash, shares_owned); // Sell
+        } else {
+            (port_ref.cash.unwrap(), shares_owned)
+        }
+    }
+
+    pub fn actionEval(&mut self, mut df: DataFrame) -> DataFrame {
+        let date = df.column("Date").unwrap().datetime().unwrap();
+        let open = df.column("Close").unwrap().f64().unwrap();
+        let close = df.column("Action").unwrap().i32().unwrap();
+        let values: Vec<(f64, f64)> = close
+            .into_iter()
+            .zip(open.into_iter())
+            .zip(date.into_iter())
+            .map(|(((opt_c), opt_o), opt_d)| match (opt_d, opt_o, opt_c) {
+                (Some(d), Some(c), Some(a)) => {
+                    self.actionTest(Utc.timestamp_opt(d, 0).unwrap(), a, c)
+                }
+                _ => (0.0, 0.0),
+            })
+            .collect();
+        let (vec1, vec2): (Vec<f64>, Vec<f64>) = values.into_iter().unzip();
+        let new_series1 = Series::new("Portfolio".into(), vec1);
+        let new_series2 = Series::new("ORCL".into(), vec2);
+        df.with_column(new_series1).unwrap();
+        df.with_column(new_series2).unwrap();
+        //println!("{:?}", df.lazy().filter(col("ORCL").gt(1.0)).collect());
+        //println!("{:?}", df.lazy().filter(col("ORCL").gt(1.0)).collect());
+        println!("{:?}", df);
+        df
+        //todo!()
+    }
+
+    pub fn traders(&mut self, d: DateTime<Utc>, o: f64, c: f64, h: f64, l: f64) -> i32 {
+        //let buffer = &mut self.conf_map["ORCL"].buff.data;
+        let buffer = &mut self.conf_map.get_mut("ORCL").unwrap().buff.data;
+        let bar_new = Bar {
+            symbol: "ORCL".to_string(),
+            open_price: Num::from_str(&o.to_string()).unwrap(),
+            high_price: Num::from_str(&h.to_string()).unwrap(),
+            low_price: Num::from_str(&l.to_string()).unwrap(),
+            close_price: Num::from_str(&c.to_string()).unwrap(),
+            volume: Num::from(100),
+            timestamp: d,
+        };
+
+        //let mut buffer: VecDeque<Bar> = VecDeque::with_capacity(5);
+
+        // If the buffer already has 5 items, remove the oldest (front) item.
+        let res = if buffer.len() == 5 {
+            let poped = buffer.pop_front();
+            let res = if poped.unwrap().close_price > bar_new.close_price {
+                1
+            } else {
+                -1
+            };
+            res
+        } else {
+            0
+        };
+        buffer.push_back(bar_new);
+        // Add the new value to the back of the buffer.
+
+        println!("Buffer length: {}", buffer.len());
+        res
     }
 
     #[allow(dead_code)]
@@ -287,6 +451,47 @@ impl TraderConfigs {
         c.gen_liste(request).await.unwrap().into_inner().result
     }
 
+    //DATA FAKE
+    async fn data_from_csv(&mut self) -> DataFrame {
+        let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
+        //timestamp: DateTime<Utc>
+        // Parse the "date" column as Utf8 (string), then convert to DateTime<Utc>
+
+        let date = df.column("Date").unwrap().datetime().unwrap();
+
+        //.naive_utc()
+
+        //panic!("test)");
+
+        let open = df.column("Open").unwrap().f64().unwrap();
+        let close = df.column("Close").unwrap().f64().unwrap();
+        let high = df.column("High").unwrap().f64().unwrap();
+        let low = df.column("Low").unwrap().f64().unwrap();
+        //let Volume = df.column("Volume").unwrap().f64().unwrap();
+
+        // Perform the operation
+        let values: Vec<i32> = close
+            .into_iter()
+            .zip(open.into_iter())
+            .zip(high.into_iter())
+            .zip(low.into_iter())
+            .zip(date.into_iter())
+            .map(|((((opt_c, opt_l), opt_h), opt_o), opt_d)| {
+                match (opt_d, opt_l, opt_h, opt_o, opt_c) {
+                    (Some(d), Some(o), Some(h), Some(l), Some(c)) => {
+                        self.traders(Utc.timestamp_opt(d, 0).unwrap(), o, c, h, l)
+                    }
+                    _ => 0,
+                }
+            })
+            .collect();
+
+        let new_series = Series::new("Action".into(), values);
+        df.with_column(new_series).unwrap();
+        println!("{:?}", df);
+        df
+    }
+
     //trader for every symbol
     async fn trader(self: Arc<Self>, trader_conf: &TraderConf, col: &str) -> Result<(), CLIError> {
         let self_clone = Arc::clone(&self);
@@ -340,6 +545,50 @@ mod tests {
     use proto::*;
     use proto::{indicator_client::IndicatorClient, ListNumbersRequest2, ListNumbersResponse};
     use tonic::transport::Channel;
+
+    #[tokio::test]
+    async fn data_csv_test() {
+        //let client = IndicatorClient::connect("http://[::1]:50051").await?;
+
+        let settings = Settings::new().unwrap();
+        println!("{settings:?}");
+
+        let mut tr = TraderConfigs::new(settings, "Config.toml", None, "ORCL")
+            .await
+            .unwrap();
+
+        let action_vec = tr.data_from_csv().await;
+        tr.actionEval(action_vec);
+        /* let foo = Arc::new(tr);
+        let req = proto::ListNumbersRequest2 {
+            id: indicator.into(),
+            list: data,
+        };
+
+        foo.data_indicator_get(req); */
+
+        //println!("TraderConfigs: {:#?}", tr);
+        //assert!(tr.conf_map.contains_key("ORCL"));
+        panic!("Test not implemented yet");
+    }
+
+    #[tokio::test]
+    async fn portfolio_read() -> Result<(), Box<dyn std::error::Error>> {
+        let mut portfolio = Portfolio {
+            name: String::from("Test Portfolio"),
+            cash: Some(1000.0),
+            stocks: Some(HashMap::from([("ORCL".to_string(), 0.0)])),
+        };
+        portfolio.buy("ORCL", 10.0, 50.0); //500 10
+        assert_eq!(portfolio.cash.unwrap(), 500.0);
+        portfolio.sell("ORCL", 5.0, 55.0); //775 5
+        println!("Portfolio: {:?}", portfolio);
+        assert_eq!(portfolio.cash.unwrap(), 775.0);
+        assert_eq!(portfolio.stocks.unwrap().get("ORCL").unwrap(), &5.0);
+        assert_eq!(portfolio.name, "Test Portfolio");
+
+        Ok(())
+    }
 
     // Generate server `MockHelloServer` for the `calculate.Indicator` service.
     //generate_server!("calculate.Indicator", MockCalculateServer);
@@ -448,7 +697,7 @@ mod tests {
         };
 
         foo.data_indicator_get(req); */
-        let client = IndicatorClient::connect("http://[::1]:50051").await?;
+        /* let client = IndicatorClient::connect("http://[::1]:50051").await?;
         let tr = TraderConfigs::new("Config.toml", Some(client), "ORCL").await?;
 
         let settings = Settings::new().unwrap();
@@ -464,7 +713,7 @@ mod tests {
 
         for i in handles {
             i.await.unwrap();
-        }
+        } */
 
         Ok(())
     }
