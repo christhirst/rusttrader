@@ -9,6 +9,7 @@ pub struct TraderConf {
     pub symbol: String,
     pub price_label: String,
     pub indicator: Vec<IndicatorType>,
+    pub shares_to_buy: f64,
     pub buffersize: usize,
 }
 
@@ -79,6 +80,7 @@ fn config_parse_test() -> Result<(), Box<dyn std::error::Error>> {
 
     // Print out our settings
     println!("{settings:?}");
-    panic!("Test failed, this is a panic to test the error handling in the test framework");
+    //panic!("Test failed, this is a panic to test the error handling in the test framework");
+    assert!(settings.is_ok(), "Failed to parse settings");
     Ok(())
 }

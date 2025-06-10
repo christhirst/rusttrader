@@ -13,6 +13,7 @@ baseurl = "http://localhost:8000"
 [Stockconfig.ORCL]
 symbol = "ORCL"
 price_label = "Close"
+shares_to_buy = 10
 indicator = [
     { type = "BollingerBands" },
     { type = "ExponentialMovingAverage" },
