@@ -1,6 +1,6 @@
 //#[feature(arbitrary_self_types)]
 
-use apca::data::v2::stream::Bar;
+use apca::data::v2::stream::{Bar, Data, Quote, Trade};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use mockall::automock;
 use num_decimal::Num;
@@ -29,7 +29,7 @@ use tonic::transport::Channel;
 
 use crate::{
     config::AppConfig,
-    config2::Settings,
+    config2::{Settings, TraderConf},
     data::data_csv,
     dataframe::data_select_column1,
     error::CLIError,
@@ -37,22 +37,12 @@ use crate::{
     indicator_decision::action_evaluator,
     proto::{self, indicator_client::IndicatorClient, ListNumbersRequest2},
     trade::{self, StockActions},
-    types::{
-        ActionConfig, ActionEval, ActionValidate, ActionValuator, Buffer, Indi, IndiValidate,
-        TraderConf,
-    },
+    types::{ActionConfig, ActionEval, ActionValidate, ActionValuator, Buffer, Indi, IndiValidate},
 };
 
 #[automock]
 trait Calc {
     async fn grpc(&self, req: ListNumbersRequest2, symbol: String) -> Indi;
-    async fn decision_point(
-        self: Arc<Self>,
-        conf: &TraderConf,
-        req: ListNumbersRequest2,
-        col: &str,
-    ) -> Result<ActionValuator, CLIError>;
-    //fn makes_adder(self: Arc<Self>, d: DateTime<Utc>, o: f64, c: f64, h: f64, l: f64) -> f64;
 }
 
 #[automock]
@@ -65,7 +55,7 @@ pub trait PortfolioActions {
         shares_owned: f64,
         shares_to_buy: f64,
         cash: f64,
-        a: i32,
+
         c: f64,
     ) -> (f64, f64);
 }
@@ -76,7 +66,7 @@ pub struct Portfolio {
     pub cash: Option<f64>,
     pub stocks: Option<HashMap<String, f64>>, // symbol and amount of shares
 }
-
+fn te(data: Data<Bar, Quote, Trade>) -> () {}
 impl PortfolioActions for Portfolio {
     fn buy(&mut self, symbol: &str, share_amount: f64, share_price: f64) {
         info!("Buying {} shares of {}", share_amount, symbol);
@@ -105,20 +95,22 @@ impl PortfolioActions for Portfolio {
             .entry("ORCL".to_string())
             .and_modify(|value| *value -= share_amount);
     }
+
     fn evaluator(
         self,
         port_ref: &mut Portfolio,
         shares_owned: f64,
         shares_to_buy: f64,
         cash: f64,
-        a: i32,
         c: f64,
     ) -> (f64, f64) {
+        //TODO
+        let a = 1;
         if a == 1 {
             port_ref.buy("ORCL", shares_to_buy, c);
             return (cash, shares_owned); // Buy
         } else if a == -1 {
-            port_ref.sell("ORCL", shares_to_buy, c);
+            port_ref.sell("ORCL", shares_owned, c);
             return (cash, shares_owned); // Sell
         } else {
             (port_ref.cash.unwrap(), shares_owned)
@@ -129,26 +121,34 @@ impl PortfolioActions for Portfolio {
 #[derive(Clone, Debug)]
 pub struct TraderConfigs {
     conf_map: HashMap<String, Vec<TraderConf>>,
+    //PORTFOLIO
     portfolio: Option<Portfolio>,
+    //GRPC Client
     client: Option<IndicatorClient<Channel>>,
-    stock_indicators: Option<ActionConfig>,
 }
 
-fn EvaluatorCompair(bar_Buffer: &VecDeque<Bar>) -> i32 {
+fn EvaluatorCompair(bar_Buffer: &VecDeque<Bar>) -> f64 {
+    //TODO dynamic buffers
     let res = if bar_Buffer[0].close_price > bar_Buffer[4].close_price {
-        1
+        1.0
     } else {
-        -1
+        -1.0
     };
     res
 }
 
+//TODO ADD Portfolio
 fn BufferEvaluate(
     tc: &mut TraderConf,
     /* buffer: &mut VecDeque<Bar>,
     buffer_capacity: usize, */
+    port_ref: &mut Portfolio,
+    shares_owned: f64,
+    shares_to_buy: f64,
+    cash: f64,
+
     bar_new: Bar,
-) -> i32 {
+) -> f64 {
     //TODO Read Conf for Indicator
     //MATCH to IndicatorType
     //let buffer_capacity = tc.buff.capacity;
@@ -164,7 +164,7 @@ fn BufferEvaluate(
         }; */
         res
     } else {
-        0
+        0.0
     };
     &mut tc.buff.data.push_back(bar_new);
     res
@@ -205,63 +205,13 @@ impl Calc for TraderConfigs {
         }
     }
     //TODO udjust to new structure
-    async fn decision_point(
-        self: Arc<Self>,
-        conf: &TraderConf,
-        req: ListNumbersRequest2,
-        col: &str,
-    ) -> Result<ActionValuator, CLIError> {
-        let indicator_from_stock_data = self.clone().grpc(req, conf.symbol.clone()).await;
-        println!("decision_point");
-        let validators = self.clone().stock_indicators.clone();
-        println!("self: {:#?}", self);
-        let validators = validators.clone().unwrap();
-        let validators = validators.indi_validate.unwrap().validate;
-
-        //get stock actions
-        /* let stock_actions = match self.stock_indicators.clone() {
-            Some(x) => x,
-            None => {
-                let mut self_clone = Arc::clone(&self);
-                Arc::get_mut(&mut self_clone)
-                    .unwrap()
-                    .pull_stock_data()
-                    .await?
-            }
-        }; */
-
-        let desc = desision_maker(
-            indicator_from_stock_data,
-            validators.get(&conf.symbol).unwrap().clone(),
-        );
-
-        Ok(action_evaluator(
-            conf.symbol.clone(),
-            self.stock_indicators
-                .clone()
-                .unwrap()
-                .action_validate
-                .unwrap(),
-            desc,
-        ))
-    }
-}
-
-impl fmt::Debug for TraderConf {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "TraderConf {{ symbol: {}, indicator: {:?} }}",
-            self.symbol, self.indicator
-        )
-    }
 }
 
 pub fn actionTest(d: DateTime<Utc>, a: i32, c: f64) -> (f64, f64) {
     (2.0, 2.0)
 }
 
-fn zipper(
+/* fn zipper(
     s: &mut TraderConfigs,
     d: &Logical<DatetimeType, Int64Type>,
     a: &ChunkedArray<Int32Type>,
@@ -277,7 +227,7 @@ fn zipper(
         })
         .collect();
     values
-}
+} */
 
 impl TraderConfigs {
     pub async fn new(
@@ -286,53 +236,25 @@ impl TraderConfigs {
         client: Option<IndicatorClient<Channel>>,
         sym: &str,
     ) -> Result<Self, CLIError> {
-        let mut create_trader = HashMap::new();
-        for (i, c) in settings.Stockconfig.iter() {
-            let tc = TraderConf {
-                symbol: c.symbol.clone(),
-                price_label: String::from("Close"),
-                indicator: c.indicator.clone(),
-                shares_to_buy: c.shares_to_buy,
-                buff: Buffer {
-                    capacity: c.buffersize,
-                    data: VecDeque::with_capacity(c.buffersize),
-                },
-            };
-            create_trader.insert(sym.to_string(), vec![tc]);
-        }
+        let settings = Settings::new().unwrap();
+        let kk = settings.Stockconfig;
 
         let _port = settings.grpc.grpcport.clone();
         tracing::info!("Port: {}", _port);
-        //setup multiple trader
-        //benchmark them against each other
-
-        let ac = ActionConfig {
-            action_validate: Some(ActionValidate {
-                validate: HashMap::from([
-                    (String::from("ORCL"), ActionEval::Buy(0.0)),
-                    (String::from("ORCL"), ActionEval::Sell(0.0)),
-                    (String::from("ORCL"), ActionEval::Hold(0.0)),
-                ]),
-            }),
-            indi_validate: Some(IndiValidate {
-                validate: HashMap::from([(
-                    String::from("ORCL"),
-                    HashMap::from([(proto::IndicatorType::BollingerBands, 0.0)]),
-                )]),
-            }),
-        };
 
         if let client = client {
             Ok(TraderConfigs {
-                conf_map: create_trader,
+                //Stockconfig: settings.Stockconfig,
+                conf_map: kk,
                 portfolio: Some(Portfolio {
                     name: String::from("Default Portfolio"),
                     cash: Some(1000.0),
                     stocks: Some(HashMap::from([("ORCL".to_string(), 0.0)])),
                 }),
                 client: None,
-                stock_indicators: Some(ac),
+                //stock_indicators: Some(ac),
             })
+            //todo!()
         } else {
             Err(CLIError::Converting)
         }
@@ -341,9 +263,20 @@ impl TraderConfigs {
     //TODO holding shares
     //series to graph
 
-    pub fn actionTest(&mut self, d: DateTime<Utc>, a: i32, c: f64) -> (f64, f64) {
+    pub fn actionTest(&mut self, tc: &TraderConf, d: DateTime<Utc>, p: f64, c: f64) -> (f64, f64) {
+        /* let bar_new = Bar {
+            symbol: sym.to_string(),
+            open_price: Num::from_str(&o.to_string()).unwrap(),
+            high_price: Num::from_str(&h.to_string()).unwrap(),
+            low_price: Num::from_str(&l.to_string()).unwrap(),
+            close_price: Num::from_str(&c.to_string()).unwrap(),
+            volume: Num::from(100),
+            timestamp: d,
+        };
+        BufferEvaluate(&mut tc, bar_new); */
+        //PORTFOLIO referenz
         let port_ref = self.portfolio.as_mut().unwrap();
-        let shares_to_buy = 20.0;
+        let shares_to_buy = tc.shares_to_buy.clone();
         let mut cash = port_ref.cash.unwrap();
         let mut shares_owned = port_ref
             .stocks
@@ -352,24 +285,41 @@ impl TraderConfigs {
             .get("ORCL")
             .unwrap()
             .clone();
+
         port_ref
             .clone()
-            .evaluator(port_ref, shares_owned, 20.0, cash, a, c)
+            .evaluator(port_ref, shares_owned, shares_to_buy, cash, c)
     }
-
+    //todo throw least good away
     pub fn actionEval(&mut self, mut df: DataFrame) -> DataFrame {
+        //let ee = self.stock_indicators.clone();
+
         let oo = &self.conf_map.clone();
         for (symbol, trader_conf) in oo {
             println!("Symbol: {}", symbol);
 
             //let oo = self.conf_map.get_mut("ORCL").unwrap().clone();
             for i in trader_conf {
+                println!("TraderConf: {:?}", i);
+                //INIT PORTFOLIO
+                self.portfolio = Some(Portfolio {
+                    name: String::from("Default Portfolio"),
+                    cash: Some(1000.0),
+                    stocks: Some(HashMap::from([("ORCL".to_string(), 0.0)])),
+                });
+
                 let date = df.column("Date").unwrap().datetime().unwrap();
-                let action = df.column("Action").unwrap().i32().unwrap();
+                let action = df.column("Action").unwrap().f64().unwrap();
                 let close = df.column("Close").unwrap().f64().unwrap();
 
+                //TODO one action vector, try different buffer
+                /* let zipped = date
+                .into_iter()
+                .zip(action.into_iter())
+                .zip(close.into_iter()); */
+
                 // Collect the zipped data first
-                let zipped: Vec<(Option<i64>, Option<i32>, Option<f64>)> = date
+                let zipped: Vec<(Option<i64>, Option<f64>, Option<f64>)> = date
                     .into_iter()
                     .zip(action.into_iter())
                     .zip(close.into_iter())
@@ -381,15 +331,15 @@ impl TraderConfigs {
                     .into_iter()
                     .map(|(opt_d, opt_a, opt_c)| match (opt_d, opt_a, opt_c) {
                         (Some(d), Some(a), Some(c)) => {
-                            self.actionTest(Utc.timestamp_opt(d, 0).unwrap(), a, c)
+                            self.actionTest(i, Utc.timestamp_opt(d, 0).unwrap(), a, c)
                         }
                         _ => (0.0, 0.0),
                     })
                     .collect();
-
+                let port = format!("{} Portfolio", i.variant);
                 let (vec1, vec2): (Vec<f64>, Vec<f64>) = values.into_iter().unzip();
-                let new_series1 = Series::new("Portfolio".into(), vec1);
-                let new_series2 = Series::new(i.symbol.clone().into(), vec2);
+                let new_series1 = Series::new(port.into(), vec1);
+                let new_series2 = Series::new(i.variant.clone().into(), vec2);
                 df.with_column(new_series1).unwrap();
                 df.with_column(new_series2).unwrap();
             }
@@ -401,7 +351,28 @@ impl TraderConfigs {
         //todo!()
     }
 
-    pub fn traders(&mut self, d: DateTime<Utc>, sym: &str, o: f64, c: f64, h: f64, l: f64) -> i32 {
+    pub fn traders(
+        &mut self,
+        sym: &str,
+        tc: &TraderConf,
+        d: DateTime<Utc>,
+
+        o: f64,
+        c: f64,
+        h: f64,
+        l: f64,
+    ) -> (f64, f64) {
+        let data = Data::Bar(Bar {
+            symbol: sym.to_string(),
+            open_price: Num::from_str(&o.to_string()).unwrap(),
+            high_price: Num::from_str(&h.to_string()).unwrap(),
+            low_price: Num::from_str(&l.to_string()).unwrap(),
+            close_price: Num::from_str(&c.to_string()).unwrap(),
+            volume: Num::from(100),
+            timestamp: d,
+        });
+
+        te(data);
         // conf_map: HashMap<String, TraderConf>
         //let buffer_capacity = self.conf_map.get_mut(sym).unwrap().buff.capacity;
         //let buffer_from_self = &mut self.conf_map.get_mut(sym).unwrap().buff.data;
@@ -414,9 +385,25 @@ impl TraderConfigs {
             volume: Num::from(100),
             timestamp: d,
         };
+        let port_ref = self.portfolio.as_mut().unwrap();
+        let shares_to_buy = 22.0;
+        let mut cash = port_ref.cash.unwrap();
+        let mut shares_owned = port_ref
+            .stocks
+            .clone()
+            .unwrap()
+            .get("ORCL")
+            .unwrap()
+            .clone();
+
         let oo = self.conf_map.get_mut(sym).unwrap();
         let oo = oo.first_mut().unwrap();
-        BufferEvaluate(oo, bar_new)
+
+        //TODO
+        BufferEvaluate(oo, port_ref, shares_owned, shares_to_buy, cash, bar_new);
+        port_ref
+            .clone()
+            .evaluator(port_ref, shares_owned, shares_to_buy, cash, c)
     }
 
     #[allow(dead_code)]
@@ -445,7 +432,7 @@ impl TraderConfigs {
                 )]),
             }),
         };
-        self.stock_indicators = Some(ii.clone());
+        //self.stock_indicators = Some(ii.clone());
 
         Ok(ii)
     }
@@ -501,47 +488,69 @@ impl TraderConfigs {
 
     //DATA FAKE
     async fn data_from_csv(&mut self) -> DataFrame {
-        let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
-        //timestamp: DateTime<Utc>
-        // Parse the "date" column as Utf8 (string), then convert to DateTime<Utc>
-        let sym = "ORCL";
+        let trader_conf = &self.conf_map.clone();
+        for (symbol, trader_conf) in trader_conf {
+            let mut df = data_csv(String::from("files/orcl.csv")).unwrap();
 
-        let date = df.column("Date").unwrap().datetime().unwrap();
-        let open = df.column("Open").unwrap().f64().unwrap();
-        let close = df.column("Close").unwrap().f64().unwrap();
-        let high = df.column("High").unwrap().f64().unwrap();
-        let low = df.column("Low").unwrap().f64().unwrap();
-        //let Volume = df.column("Volume").unwrap().f64().unwrap();
+            for i in trader_conf {
+                //COPY for loop
+                let mut df = df.clone();
+                //timestamp: DateTime<Utc>
+                // Parse the "date" column as Utf8 (string), then convert to DateTime<Utc>
+                let sym = "ORCL";
+                let co = self.conf_map.get(sym).unwrap().clone();
 
-        //TODO Each SYML gets a Config with inducators
-        //TODO data from csv in config or stream
-        // Perform the operation
-        let values: Vec<i32> = close
-            .into_iter()
-            .zip(open.into_iter())
-            .zip(high.into_iter())
-            .zip(low.into_iter())
-            .zip(date.into_iter())
-            .map(|((((opt_c, opt_l), opt_h), opt_o), opt_d)| {
-                match (opt_d, opt_l, opt_h, opt_o, opt_c) {
-                    (Some(d), Some(o), Some(h), Some(l), Some(c)) => {
-                        self.traders(Utc.timestamp_opt(d, 0).unwrap(), sym, o, c, h, l)
-                    }
-                    _ => 0,
-                }
-            })
-            .collect();
+                let date = df.column("Date").unwrap().datetime().unwrap();
+                let open = df.column("Open").unwrap().f64().unwrap();
+                let close = df.column("Close").unwrap().f64().unwrap();
+                let high = df.column("High").unwrap().f64().unwrap();
+                let low = df.column("Low").unwrap().f64().unwrap();
+                //let Volume = df.column("Volume").unwrap().f64().unwrap();
 
-        let new_series = Series::new("Action".into(), values);
-        df.with_column(new_series).unwrap();
-        df = df.drop("Open").unwrap();
-        df = df.drop("High").unwrap();
-        df = df.drop("Low").unwrap();
-        df = df.drop("Adj Close").unwrap();
-        df = df.drop("Volume").unwrap();
+                //TODO Each SYML gets a Config with inducators
+                //TODO data from csv in config or stream
+                // Perform the operation
+                let values: Vec<(f64, f64)> = close
+                    .into_iter()
+                    .zip(open.into_iter())
+                    .zip(high.into_iter())
+                    .zip(low.into_iter())
+                    .zip(date.into_iter())
+                    .map(|((((opt_c, opt_l), opt_h), opt_o), opt_d)| {
+                        match (opt_d, opt_l, opt_h, opt_o, opt_c) {
+                            (Some(d), Some(o), Some(h), Some(l), Some(c)) => self.traders(
+                                symbol,
+                                i,
+                                Utc.timestamp_opt(d, 0).unwrap(),
+                                o,
+                                c,
+                                h,
+                                l,
+                            ),
+                            _ => (0.0, 0.0),
+                        }
+                    })
+                    .collect();
 
-        println!("{:?}", df);
-        df
+                let cash = format!("{} Cash", i.variant);
+                let shares = format!("{} Shares", i.variant);
+                let (vec1, vec2): (Vec<f64>, Vec<f64>) = values.into_iter().unzip();
+                let new_series1 = Series::new(cash.into(), vec1);
+                let new_series2 = Series::new(shares.into(), vec2);
+                df.with_column(new_series1).unwrap();
+                df.with_column(new_series2).unwrap();
+
+                df = df.drop("Open").unwrap();
+                df = df.drop("High").unwrap();
+                df = df.drop("Low").unwrap();
+                df = df.drop("Adj Close").unwrap();
+                df = df.drop("Volume").unwrap();
+
+                println!("{:?}", df);
+                df;
+            }
+        }
+        todo!();
     }
 
     //trader for every symbol
@@ -568,7 +577,7 @@ impl TraderConfigs {
 
         //ticker
         let trader_conf = trader_conf.clone();
-        let t = tokio::spawn(async move {
+        /* let t = tokio::spawn(async move {
             loop {
                 sleep(std::time::Duration::from_millis(1000)).await;
                 let decision = self_clone
@@ -576,9 +585,9 @@ impl TraderConfigs {
                     .decision_point(&trader_conf, req.clone(), "Close")
                     .await;
             }
-        });
+        }); */
 
-        t.await.unwrap();
+        //t.await.unwrap();
 
         Ok(())
     }
@@ -599,6 +608,11 @@ mod tests {
     use tonic::transport::Channel;
 
     #[tokio::test]
+    async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn data_csv_test() {
         //let client = IndicatorClient::connect("http://[::1]:50051").await?;
 
@@ -610,7 +624,7 @@ mod tests {
             .unwrap();
 
         let action_vec = tr.data_from_csv().await;
-        tr.actionEval(action_vec);
+        //tr.actionEval(action_vec);
 
         panic!("Test not implemented yet");
     }
@@ -633,16 +647,7 @@ mod tests {
         Ok(())
     }
 
-    /* #[tokio::test]
-       async fn new_test() -> Result<(), Box<dyn std::error::Error>> {
-           //new TraderConfig
-           let tr = TraderConfigs::new("Config.toml", None, "ORCL").await?;
-           //get symbol
-           let conf_tr = tr.conf_map.get("ORCL");
-           //check config exists
-           assert!(conf_tr.is_some());
-           Ok(())
-       }
+    /*
 
        #[tokio::test]
        async fn decision_point_test() -> Result<(), Box<dyn std::error::Error>> {

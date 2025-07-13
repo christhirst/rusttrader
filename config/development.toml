@@ -3,14 +3,15 @@
 grpcport = "http://[::1]:50051"
 username = "testuser"
 password = "testPW"
-baseurl = "http://localhost:8000"
+baseurl = "http://172.27.214.136:8000"
 
 
 #[debug]
 #echo = true
 # --- conf_map ---
 # Each key here (e.g., "trader1") maps to a TraderConf configuration.
-[Stockconfig.ORCL]
+[[Stockconfig.ORCL]]
+variant = "type1"
 symbol = "ORCL"
 price_label = "Close"
 shares_to_buy = 10
@@ -19,8 +20,31 @@ indicator = [
     { type = "ExponentialMovingAverage" },
     { type = "RelativeStrengthIndex" },
 ]
-buffersize = 5
+buffersize = 10
+buff = { capacity = 10, data = [] }
 
+[[Stockconfig.ORCL]]
+variant = "type2"
+symbol = "ORCL"
+price_label = "Open"
+shares_to_buy = 25
+indicator = [{ type = "SimpleMovingAverage" }]
+buffersize = 10
+buff = { capacity = 5, data = [] }
+
+
+[[Stockconfig.ORCL2]]
+variant = "type1"
+symbol = "ORCL"
+price_label = "Close"
+shares_to_buy = 100
+indicator = [
+    { type = "BollingerBands" },
+    { type = "ExponentialMovingAverage" },
+    { type = "RelativeStrengthIndex" },
+]
+buffersize = 20
+buff = { capacity = 20, data = [] }
 
 # Optional ActionValidate configuration.
 #[conf_map.action_validate]

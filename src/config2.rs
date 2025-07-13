@@ -1,16 +1,28 @@
 use crate::proto::{self};
+use apca::data::v2::stream::Bar;
 use config::{Config, ConfigError, Environment, File};
 use serde_derive::Deserialize;
-use std::{collections::HashMap, env};
+use std::{
+    collections::{HashMap, VecDeque},
+    env,
+};
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
+pub struct Buffer {
+    pub capacity: usize,
+    pub data: VecDeque<Bar>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 #[allow(unused)]
 pub struct TraderConf {
+    pub variant: String,
     pub symbol: String,
     pub price_label: String,
     pub indicator: Vec<IndicatorType>,
     pub shares_to_buy: f64,
-    pub buffersize: usize,
+    //pub buffersize: usize,
+    pub buff: Buffer,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,7 +52,7 @@ pub enum IndicatorType {
 #[derive(Debug, Deserialize)]
 #[allow(unused)]
 pub(crate) struct Settings {
-    pub Stockconfig: HashMap<String, TraderConf>,
+    pub Stockconfig: HashMap<String, Vec<TraderConf>>,
     pub grpc: AppConfig,
 }
 
@@ -77,7 +89,10 @@ impl Settings {
 #[test]
 fn config_parse_test() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::new();
-
+    let ii = settings.as_ref().unwrap().Stockconfig.get("ORCL");
+    println!("{ii:?}");
+    let ii = settings.as_ref().unwrap().Stockconfig.get("ORCL2");
+    println!("{ii:?}");
     // Print out our settings
     println!("{settings:?}");
     //panic!("Test failed, this is a panic to test the error handling in the test framework");

@@ -44,7 +44,7 @@ pub struct ActionConfig {
 
 #[derive(Clone)]
 pub struct TraderConf {
-    pub symbol: String,
+    pub variant: String,
     pub price_label: String,
     pub indicator: Vec<IndicatorType>,
     pub shares_to_buy: f64,

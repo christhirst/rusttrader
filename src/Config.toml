@@ -4,7 +4,7 @@ password = "testPW"
 baseurl = "http://localhost:8000"
 urlget = "/te?q=123+eq+123 AND "
 urlfilter = [["aa::bb::cc", ["AA", "BB"]]]
-entries = 10
+entries = 5
 filter1 = "AAccount"
 filter2 = "Update"
 urlput = "/users"

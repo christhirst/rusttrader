@@ -1,5 +1,6 @@
 //no warnings
 #![allow(warnings)]
+
 use apca::data::v2::stream::Data;
 use error::CLIError;
 use std::sync::Arc;
