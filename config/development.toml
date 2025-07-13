@@ -26,25 +26,25 @@ buff = { capacity = 10, data = [] }
 [[Stockconfig.ORCL]]
 variant = "type2"
 symbol = "ORCL"
-price_label = "Open"
-shares_to_buy = 25
+price_label = "Close"
+shares_to_buy = 10
 indicator = [{ type = "SimpleMovingAverage" }]
 buffersize = 10
-buff = { capacity = 5, data = [] }
+buff = { capacity = 10, data = [] }
 
 
-[[Stockconfig.ORCL2]]
-variant = "type1"
+[[Stockconfig.ORCL]]
+variant = "type3"
 symbol = "ORCL"
 price_label = "Close"
-shares_to_buy = 100
+shares_to_buy = 10
 indicator = [
     { type = "BollingerBands" },
     { type = "ExponentialMovingAverage" },
     { type = "RelativeStrengthIndex" },
 ]
-buffersize = 20
-buff = { capacity = 20, data = [] }
+buffersize = 10
+buff = { capacity = 10, data = [] }
 
 # Optional ActionValidate configuration.
 #[conf_map.action_validate]

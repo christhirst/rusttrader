@@ -20,9 +20,9 @@ mod runner;
 mod test_helper;
 mod trade;
 mod trader;
-mod traits;
 mod types;
 use proto::indicator_client::IndicatorClient;
+mod portfolio;
 
 pub mod proto {
     tonic::include_proto!("calculate");

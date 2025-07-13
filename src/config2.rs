@@ -1,4 +1,7 @@
-use crate::proto::{self};
+use crate::{
+    portfolio::types::TraderConf,
+    proto::{self},
+};
 use apca::data::v2::stream::Bar;
 use config::{Config, ConfigError, Environment, File};
 use serde_derive::Deserialize;
@@ -13,7 +16,7 @@ pub struct Buffer {
     pub data: VecDeque<Bar>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+/* #[derive(Deserialize, Clone, Debug)]
 #[allow(unused)]
 pub struct TraderConf {
     pub variant: String,
@@ -24,7 +27,7 @@ pub struct TraderConf {
     //pub buffersize: usize,
     pub buff: Buffer,
 }
-
+ */
 #[derive(Debug, Deserialize)]
 #[allow(unused)]
 pub struct AppConfig {
@@ -33,7 +36,7 @@ pub struct AppConfig {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+/* #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum IndicatorType {
     BollingerBands = 0,
@@ -47,7 +50,7 @@ pub enum IndicatorType {
     RelativeStrengthIndex = 8,
     SimpleMovingAverage = 9,
     StandardDeviation = 10,
-}
+} */
 
 #[derive(Debug, Deserialize)]
 #[allow(unused)]

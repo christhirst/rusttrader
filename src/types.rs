@@ -1,9 +1,6 @@
 use apca::data::v2::stream::Bar;
 
-use crate::{
-    config2::IndicatorType,
-    proto::{self},
-};
+use crate::proto::{self};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug)]
@@ -40,15 +37,6 @@ pub struct ActionValidate {
 pub struct ActionConfig {
     pub action_validate: Option<ActionValidate>,
     pub indi_validate: Option<IndiValidate>,
-}
-
-#[derive(Clone)]
-pub struct TraderConf {
-    pub variant: String,
-    pub price_label: String,
-    pub indicator: Vec<IndicatorType>,
-    pub shares_to_buy: f64,
-    pub buff: Buffer,
 }
 
 #[derive(Clone, PartialEq, Debug)]

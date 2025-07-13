@@ -1,8 +1,5 @@
 //TODO function with loop
 //TODO function either listen to grpc or loop with getting data
-//TODO
-//TODO
-//TODO
 
 use crate::trader::TraderConfigs;
 
@@ -36,16 +33,6 @@ pub struct live_data {
     }
     //todo grpc listener
     //grpc or:
-} */
-
-/* async fn grpc_listen_or_loop(ds: Data_Source) {
-    match ds {
-        Data_Source::Grpc => {
-            sleep(std::time::Duration::from_millis(1000)).await;
-        }
-        Data_Source::Get => {}
-        Data_Source::Csv => loop_data(todo!(), todo!(), todo!(), todo!(), todo!()).await,
-    }
 } */
 
 #[cfg(test)]
